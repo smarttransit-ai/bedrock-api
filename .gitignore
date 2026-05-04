@@ -1,0 +1,45 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Build artifacts
+dist/
+build/
+*.zip
+
+# Python (Lambda packaging)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node (if we end up needing it)
+node_modules/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Local env
+.env
+.env.local
