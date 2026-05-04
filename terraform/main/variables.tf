@@ -10,17 +10,8 @@ variable "name_prefix" {
   default     = "bedrock-api"
 }
 
-variable "model_allowlist" {
-  description = "List of Bedrock cross-region inference profile IDs the Lambda may invoke. IDs match the pricing map in lambda/proxy/pricing.py."
-  type        = list(string)
-  default = [
-    "us.anthropic.claude-sonnet-4-6",
-    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-  ]
-}
-
 variable "default_models" {
-  description = "Comma-separated default model allowlist passed to Lambda as ALLOWED_MODELS_DEFAULT. Empty string = no system-level restriction (per-token allowed_models attribute governs)."
+  description = "Comma-separated system-wide model allowlist (passed to Lambda as ALLOWED_MODELS_DEFAULT). Empty string = no system-level restriction; per-token allowed_models still applies. IAM grants the Lambda bedrock:InvokeModel on * — the Lambda is the authoritative model gate."
   type        = string
   default     = ""
 }
