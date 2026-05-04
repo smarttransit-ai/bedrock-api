@@ -1,4 +1,4 @@
-.PHONY: fmt lint test package tf-init tf-plan tf-apply
+.PHONY: fmt lint test e2e package tf-init tf-plan tf-apply
 
 fmt:
 	ruff format .
@@ -10,6 +10,9 @@ lint:
 
 test:
 	pytest
+
+e2e:
+	E2E=1 pytest tests/e2e/ -v
 
 package:
 	mkdir -p dist
