@@ -5,11 +5,11 @@ import os
 # All values are integer USD-micros (µUSD) per 1,000 tokens.
 # 1 µUSD = $0.000001.  $3.00/1M tokens = 3,000 µUSD/1k tokens.
 DEFAULT_PRICING: dict[str, dict[str, int]] = {
-    "us.anthropic.claude-sonnet-4-6-20250514-v1:0": {
+    "us.anthropic.claude-sonnet-4-6": {
         "input_usd_micros_per_1k": 3_000,  # $3.00 / 1M input tokens
         "output_usd_micros_per_1k": 15_000,  # $15.00 / 1M output tokens
     },
-    "us.anthropic.claude-haiku-4-5-20250207-v1:0": {
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
         "input_usd_micros_per_1k": 800,  # $0.80 / 1M input tokens
         "output_usd_micros_per_1k": 4_000,  # $4.00 / 1M output tokens
     },

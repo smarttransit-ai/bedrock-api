@@ -271,7 +271,7 @@ def test_model_not_allowed(test_token, bedrock_stub):
     tokens_table.update_item(
         Key={"token_id": token_id},
         UpdateExpression="SET allowed_models = :v",
-        ExpressionAttributeValues={":v": {"us.anthropic.claude-haiku-4-5-20250207-v1:0"}},
+        ExpressionAttributeValues={":v": {"us.anthropic.claude-haiku-4-5-20251001-v1:0"}},
     )
 
     client, stubber = bedrock_stub

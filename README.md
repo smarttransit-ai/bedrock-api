@@ -100,7 +100,7 @@ Global flags (can also be set via `AWS_REGION` / `AWS_DEFAULT_REGION`):
 # Issue with a $10/month budget and Claude Sonnet + Haiku access
 bedrock-api issue alice \
   --budget 10.00 \
-  --models us.anthropic.claude-sonnet-4-6-20250514-v1:0,us.anthropic.claude-haiku-4-5-20250207-v1:0 \
+  --models us.anthropic.claude-sonnet-4-6,us.anthropic.claude-haiku-4-5-20251001-v1:0 \
   --note "grad student"
 ```
 
@@ -133,7 +133,7 @@ Quick curl test:
 ```bash
 API_URL="<api_url from terraform output>"
 TOKEN="$(cat token.txt)"
-MODEL="us.anthropic.claude-sonnet-4-6-20250514-v1%3A0"
+MODEL="us.anthropic.claude-sonnet-4-6"
 
 curl -s -X POST "${API_URL}/model/${MODEL}/converse" \
   -H "Authorization: Bearer ${TOKEN}" \
@@ -170,7 +170,7 @@ bedrock-api set-limit bk_<token_id> --budget 25.00 --rps 5
 
 # Restrict to Haiku only
 bedrock-api set-limit bk_<token_id> \
-  --models us.anthropic.claude-haiku-4-5-20250207-v1:0
+  --models us.anthropic.claude-haiku-4-5-20251001-v1:0
 
 # Remove model restriction (allow all)
 bedrock-api set-limit bk_<token_id> --models ""

@@ -110,8 +110,8 @@ Default models (prices from https://aws.amazon.com/bedrock/pricing/ on 2025-05-1
 
 | Model | Input µUSD/1k | Output µUSD/1k |
 |---|---|---|
-| `us.anthropic.claude-sonnet-4-6-20250514-v1:0` | 3 000 | 15 000 |
-| `us.anthropic.claude-haiku-4-5-20250207-v1:0` | 800 | 4 000 |
+| `us.anthropic.claude-sonnet-4-6` | 3 000 | 15 000 |
+| `us.anthropic.claude-haiku-4-5-20251001-v1:0` | 800 | 4 000 |
 
 Unknown models fall back to Sonnet 4.6 rates (conservative).
 
