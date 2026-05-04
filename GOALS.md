@@ -152,3 +152,26 @@ credentials. Subcommands: `issue`, `revoke`, `list`, `show`, `set-limit`,
 - Web admin UI.
 - Multi-account / cross-account Bedrock access.
 - Self-service token rotation for lab members.
+
+---
+
+## Post-deploy amendments
+
+Captured here so future readers know the live design diverged from the
+original Q&A above. The Q&A is a faithful record of the up-front design
+decisions; the items below are decisions made after the first end-to-end
+deploy succeeded and revealed sharper requirements.
+
+- **IAM is wide open on Bedrock** (`bedrock:InvokeModel` on `*`). The
+  original plan scoped IAM to a specific inference-profile allowlist.
+  Cross-region inference profiles dispatch to underlying foundation models,
+  so the IAM scope had to widen anyway — at which point the Lambda became
+  the natural model gate. `var.model_allowlist` was deleted; the per-token
+  `allowed_models` attribute and the optional system-wide `var.default_models`
+  (Lambda env `ALLOWED_MODELS_DEFAULT`) are the real model gates.
+- **Default `--budget` on `bedrock-api issue` is $200/month.** Originally
+  every limit defaulted to absent (= unlimited). $200 is the only limit
+  that now defaults to a value; the rest still default to absent. To issue
+  a token with no monthly USD cap, the operator must remove
+  `limit_monthly_usd_micros` directly with `aws dynamodb update-item ...
+  REMOVE` (intentionally not exposed via CLI).
