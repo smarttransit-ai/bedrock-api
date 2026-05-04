@@ -167,8 +167,10 @@ limits + usage. Two-table design proposed (validated in planning):
 - `terraform validate` and `terraform plan` (with sensible default vars +
   empty backend creds) succeed.
 - Outputs include the public API URL.
-- Variables: `region`, `model_allowlist`, `default_models`, `log_retention_days`,
-  `domain_name`, `lambda_memory_mb`, `lambda_timeout_s`.
+- Variables: `region`, `default_models`, `log_retention_days`, `domain_name`,
+  `hosted_zone_id`, `lambda_memory_mb`, `lambda_timeout_s`. (`model_allowlist`
+  was removed post-deploy when IAM was opened to `*`; the Lambda is now the
+  authoritative model gate.)
 
 **Depends on:** T03, T04.
 

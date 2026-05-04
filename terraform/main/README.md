@@ -72,8 +72,7 @@ The `api_url` output contains the endpoint clients should send requests to.
 |---|---|---|
 | `region` | `us-east-1` | AWS region |
 | `name_prefix` | `bedrock-api` | Prefix for all resource names |
-| `model_allowlist` | Sonnet 4.6 + Haiku 4.5 | Bedrock cross-region inference profile IDs |
-| `default_models` | `""` | Comma-separated default model allowlist for Lambda (`ALLOWED_MODELS_DEFAULT`) |
+| `default_models` | `""` | Comma-separated system-wide model allowlist passed to the Lambda as `ALLOWED_MODELS_DEFAULT`. Empty = no system-level restriction; per-token `allowed_models` still applies. IAM grants `bedrock:InvokeModel` on `*`, so the Lambda is the model gate. |
 | `log_retention_days` | `14` | CloudWatch log retention in days |
 | `lambda_memory_mb` | `512` | Lambda memory in MB |
 | `lambda_timeout_s` | `60` | Lambda timeout in seconds |
@@ -120,10 +119,11 @@ The proxy Lambda's execution role is least-privilege:
 | `tokens` table | `dynamodb:GetItem` |
 | `usage` table | `dynamodb:GetItem`, `dynamodb:UpdateItem` |
 | `rate_limit` table | `dynamodb:UpdateItem` |
-| Bedrock inference profiles | `bedrock:InvokeModel` |
+| Bedrock | `bedrock:InvokeModel` on `*` |
 | Lambda log group | `logs:CreateLogStream`, `logs:PutLogEvents` |
 
-Bedrock IAM uses `arn:aws:bedrock:REGION::inference-profile/MODEL_ID` for
-system-defined cross-region inference profiles. If `AccessDeniedException`
-occurs at runtime with cross-region profiles, change the resource to
-`arn:aws:bedrock:*::foundation-model/*` in `modules/proxy/main.tf`.
+Bedrock IAM is intentionally permissive (`Resource = ["*"]`). The model
+allowlist is enforced inside the Lambda — first by the per-token
+`allowed_models` attribute, then by the optional system-wide
+`ALLOWED_MODELS_DEFAULT` env var (`var.default_models`). Per-token
+`--budget` caps the cost blast radius of any leaked token.
