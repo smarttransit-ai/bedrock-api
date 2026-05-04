@@ -22,3 +22,18 @@ Default agent: **Copilot** (`gh copilot -- -p ... --allow-all --autopilot
 is tight, Copilot is wide open and the user requested it.
 
 ---
+
+## T01 — Repo scaffolding & layout
+
+- **Tier:** low
+- **Agent:** Copilot, `claude-sonnet-4.6`
+- **Plan/review rounds:** 1 (combined plan+impl for low-tier task)
+- **Implementation rounds:** 1
+- **Cost:** 1 premium request, 2m 45s, ↑722.9k / ↓7.0k tokens (681.6k cached)
+- **Outcome:** ✅ pass — `make lint test` exits 0, `terraform fmt -check -recursive`
+  exits 0, commit clean (no attribution).
+- **Files added:** [pyproject.toml](./pyproject.toml), [Makefile](./Makefile),
+  [.editorconfig](./.editorconfig), [.pre-commit-config.yaml](./.pre-commit-config.yaml),
+  [tests/test_smoke.py](./tests/test_smoke.py), [T01_PLAN.md](./T01_PLAN.md),
+  placeholder `.gitkeep` files in `terraform/{bootstrap,main}/`,
+  `lambda/proxy/`, `cli/bedrock_api/`, `bin/`.
