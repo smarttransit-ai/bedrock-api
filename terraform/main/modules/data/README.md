@@ -191,10 +191,6 @@ No GSIs.
 | `output_tokens` | N | Total output tokens this period |
 | `usd_micros` | N | Total USD × 1 000 000 (integer) |
 
-> **Note:** `bedrock-api_TASKS.md` T03 calls this field `dollars_micro`. The
-> canonical attribute name in this schema is **`usd_micros`**. T04 and T06
-> must use `usd_micros`.
-
 ### Period computation
 
 ```python
