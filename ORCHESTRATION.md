@@ -111,3 +111,26 @@ is tight, Copilot is wide open and the user requested it.
   [requirements.txt](./lambda/proxy/requirements.txt),
   [tests/lambda/proxy/conftest.py](./tests/lambda/proxy/conftest.py),
   [test_handler.py](./tests/lambda/proxy/test_handler.py) (10 tests).
+
+## Agent rotation — Copilot rate-limited 2h 45min
+
+After T04 Copilot exhausted its burst rate limit (monthly quota still ~3%
+used). Switched to Claude (98% remaining on a fresh 5h window) for T05+T06
+to keep momentum. Will return to Copilot for T07 once it resets.
+
+## T05 — API Gateway + Lambda + IAM Terraform wiring
+
+- **Tier:** medium
+- **Agent:** Claude (`claude -p`, model `claude-sonnet-4-6`)
+- **Plan/review rounds:** 1 plan round (5 actionable findings corrected),
+  1 impl round (no actionable findings, both reviewers clean).
+- **Reviewers caught real issues:** invalid `bedrock:Converse` /
+  `bedrock:ConverseStream` IAM actions removed, HCL semicolons fixed,
+  unsupported `**` globs in `archive_file.excludes` removed,
+  `logging_level = "OFF"` added to prevent stage drift.
+- **Outcome:** ✅ pass — `terraform fmt -check -recursive` exit 0,
+  `terraform validate` clean.
+- **Files added:** 16 files / 1401 lines under [terraform/main/](./terraform/main/):
+  root module + `modules/proxy/` (Lambda + IAM + log group) + `modules/api/`
+  (HTTP API v2 + stage + access logs + optional custom domain).
+  Also [T05_PLAN.md](./T05_PLAN.md).
