@@ -60,7 +60,7 @@ def test_issue_happy_path(run_cli, tables):
 
 
 def test_issue_minimal(run_cli, tables):
-    """Issue with only owner — no limits set; absent = unlimited."""
+    """Issue with only owner — gets the $200 default budget; other limits absent."""
     stdout, _, code = run_cli(["issue", "bob"])
     assert code == 0
 
@@ -69,9 +69,9 @@ def test_issue_minimal(run_cli, tables):
     item = tokens_table.get_item(Key={"token_id": token_id})["Item"]
     assert item["owner"] == "bob"
     assert item["status"] == "active"
-    # No limit attributes written
+    assert item["limit_monthly_usd_micros"] == 200_000_000  # default $200/month
+    # All other limit attributes absent (= unlimited)
     for attr in [
-        "limit_monthly_usd_micros",
         "limit_rps",
         "limit_monthly_requests",
         "limit_max_input_tokens",

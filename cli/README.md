@@ -34,7 +34,7 @@ bedrock-api issue alice \
   --note "grad student" \
   > token.txt
 
-# Issue with no limits (unlimited)
+# Issue with all defaults (gets the $200/month budget; other limits unlimited)
 bedrock-api issue bob
 ```
 

@@ -97,12 +97,19 @@ Global flags (can also be set via `AWS_REGION` / `AWS_DEFAULT_REGION`):
 ## Issue your first token
 
 ```bash
-# Issue with a $10/month budget and Claude Sonnet + Haiku access
+# Override the $200/month default budget and restrict to two models
 bedrock-api issue alice \
   --budget 10.00 \
   --models us.anthropic.claude-sonnet-4-6,us.anthropic.claude-haiku-4-5-20251001-v1:0 \
   --note "grad student"
 ```
+
+`--budget` defaults to **$200/month** if you don't pass it. Other limits
+(`--rps`, `--monthly-requests`, `--max-input-tokens`, `--max-output-tokens`,
+`--models`) are off by default — absent = unlimited. To issue a token with
+no monthly USD cap at all, you must remove the `limit_monthly_usd_micros`
+attribute manually with `aws dynamodb update-item ... REMOVE` (intentionally
+not exposed via CLI).
 
 The **bearer token is printed to stdout exactly once and never shown again.**
 All other metadata (token_id, owner, limits) goes to stderr. To capture the
