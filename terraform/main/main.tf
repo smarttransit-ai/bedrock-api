@@ -6,12 +6,13 @@ module "data" {
 module "proxy" {
   source = "./modules/proxy"
 
-  name_prefix            = var.name_prefix
-  lambda_source_dir      = "${path.module}/../../lambda/proxy"
-  lambda_memory_mb       = var.lambda_memory_mb
-  lambda_timeout_s       = var.lambda_timeout_s
-  log_retention_days     = var.log_retention_days
-  allowed_models_default = var.default_models
+  name_prefix                 = var.name_prefix
+  lambda_source_dir           = "${path.module}/../../lambda/proxy"
+  lambda_memory_mb            = var.lambda_memory_mb
+  lambda_timeout_s            = var.lambda_timeout_s
+  lambda_reserved_concurrency = var.lambda_reserved_concurrency
+  log_retention_days          = var.log_retention_days
+  allowed_models_default      = var.default_models
 
   tokens_table_name     = module.data.tokens_table_name
   tokens_table_arn      = module.data.tokens_table_arn
@@ -24,10 +25,12 @@ module "proxy" {
 module "api" {
   source = "./modules/api"
 
-  name_prefix          = var.name_prefix
-  lambda_invoke_arn    = module.proxy.invoke_arn
-  lambda_function_name = module.proxy.function_name
-  log_retention_days   = var.log_retention_days
-  domain_name          = var.domain_name
-  hosted_zone_id       = var.hosted_zone_id
+  name_prefix            = var.name_prefix
+  lambda_invoke_arn      = module.proxy.invoke_arn
+  lambda_function_name   = module.proxy.function_name
+  log_retention_days     = var.log_retention_days
+  throttling_rate_limit  = var.throttling_rate_limit
+  throttling_burst_limit = var.throttling_burst_limit
+  domain_name            = var.domain_name
+  hosted_zone_id         = var.hosted_zone_id
 }

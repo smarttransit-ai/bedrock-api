@@ -45,3 +45,21 @@ variable "lambda_timeout_s" {
   type        = number
   default     = 60
 }
+
+variable "lambda_reserved_concurrency" {
+  description = "Reserved concurrent executions cap for the proxy Lambda."
+  type        = number
+  default     = 50
+}
+
+variable "throttling_rate_limit" {
+  description = "APIGW stage steady-state requests per second across all callers."
+  type        = number
+  default     = 20
+}
+
+variable "throttling_burst_limit" {
+  description = "APIGW stage burst requests per second across all callers."
+  type        = number
+  default     = 40
+}

@@ -76,6 +76,9 @@ The `api_url` output contains the endpoint clients should send requests to.
 | `log_retention_days` | `14` | CloudWatch log retention in days |
 | `lambda_memory_mb` | `512` | Lambda memory in MB |
 | `lambda_timeout_s` | `60` | Lambda timeout in seconds |
+| `lambda_reserved_concurrency` | `50` | Reserved concurrent executions cap on the proxy Lambda. Caps blast radius from any flood; account default is 1000. |
+| `throttling_rate_limit` | `20` | APIGW stage steady-state requests per second across all callers. |
+| `throttling_burst_limit` | `40` | APIGW stage burst requests per second across all callers. |
 | `domain_name` | `""` | Custom domain (leave empty to use default APIGW URL) |
 | `hosted_zone_id` | `""` | Route 53 hosted zone ID (required when `domain_name` is set) |
 
@@ -127,3 +130,29 @@ allowlist is enforced inside the Lambda — first by the per-token
 `allowed_models` attribute, then by the optional system-wide
 `ALLOWED_MODELS_DEFAULT` env var (`var.default_models`). Per-token
 `--budget` caps the cost blast radius of any leaked token.
+
+---
+
+## Anonymous-attack-surface controls
+
+The deployment is hardened against unauthenticated probing/scanning:
+
+- **Route narrowing.** APIGW only accepts `POST /model/{proxy+}`. Every
+  other path or method (`GET /`, `GET /.env`, `OPTIONS /healthcheck`,
+  `DELETE *`, etc.) returns 404 directly from API Gateway — no Lambda
+  invocation, no DynamoDB read, no log entry, no cost. To add a new route
+  later (e.g. a `/healthz`), add a second `aws_apigatewayv2_route`.
+- **Stage throttling.** APIGW caps total requests at
+  `var.throttling_rate_limit` rps with `var.throttling_burst_limit` burst,
+  applied across all callers. Requests over the cap are rejected at APIGW
+  with HTTP 429 and never reach Lambda. Default 20/40 — sized for lab-scale
+  interactive traffic; raise if batch jobs need it.
+- **Reserved Lambda concurrency.** The proxy Lambda is capped at
+  `var.lambda_reserved_concurrency` parallel executions (default 50). Even
+  if a flood gets past the throttle (e.g. burst), Lambda spend is bounded.
+- **TLS-only.** API Gateway HTTP API doesn't accept plain HTTP at all —
+  port 80 is closed at the edge.
+
+For per-IP rate limiting or geo restrictions, attach an AWS WAF web ACL to
+the API stage. Not in this stack — adds cost (~$5/mo + per-request
+charges) and most labs don't need it.

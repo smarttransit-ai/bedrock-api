@@ -20,15 +20,15 @@ variable "log_retention_days" {
 }
 
 variable "throttling_rate_limit" {
-  description = "Stage-level default steady-state requests per second."
+  description = "Stage-level default steady-state requests per second (across ALL callers and tokens). Sized for lab-scale interactive traffic; raise if batch jobs need it."
   type        = number
-  default     = 100
+  default     = 20
 }
 
 variable "throttling_burst_limit" {
-  description = "Stage-level default maximum requests per second (burst)."
+  description = "Stage-level default maximum requests per second (burst, across all callers)."
   type        = number
-  default     = 200
+  default     = 40
 }
 
 variable "domain_name" {

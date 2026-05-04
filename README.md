@@ -4,6 +4,11 @@ A Terraform-deployed AWS API Gateway → Lambda proxy that fronts AWS Bedrock
 with per-token authentication, rate limits, monthly request quotas, monthly
 USD budgets, input/output token caps, and per-model allowlists.
 
+The API Gateway only accepts `POST /model/{proxy+}` — any other path or
+method is rejected at the edge before reaching the Lambda. Stage throttling
+is 20 rps / 40 burst and the Lambda is capped at 50 reserved concurrent
+executions. Tunable via [`terraform/main/`](./terraform/main/) variables.
+
 ---
 
 ## Prerequisites
