@@ -54,3 +54,30 @@ is tight, Copilot is wide open and the user requested it.
   [terraform/bootstrap/outputs.tf](./terraform/bootstrap/outputs.tf),
   [terraform/bootstrap/versions.tf](./terraform/bootstrap/versions.tf),
   [terraform/bootstrap/README.md](./terraform/bootstrap/README.md).
+
+## T03 — DynamoDB schema & TF module for tokens / usage / rate-limit
+
+- **Tier:** high
+- **Agent:** Copilot, `claude-sonnet-4.6`, `--effort high`
+- **Plan/review rounds:** plan converged in 1 round; impl review converged in 2 rounds (no actionable findings round 2)
+- **Cost:** 1 premium request, 23m 16s, ↑6.0m / ↓97.1k tokens (5.6m cached)
+- **Outcome:** ✅ pass — `terraform fmt -check -recursive` and
+  `terraform validate` both 0 (with TF 1.11). Three tables provisioned.
+- **Key design decisions** (from commit message):
+  - Token format: `bk_<32hex>.<64hex>`; dot splits public `token_id` from secret.
+  - Secret hashing: SHA-256 + 16-byte per-token salt; `hmac.compare_digest`.
+  - Usage counters: single `UpdateItem` `ADD` (atomic, no transaction needed).
+  - Rate limiting: separate table, second-bucketed, TTL auto-cleanup,
+    `attribute_not_exists` guard + explicit `limit=0` pre-check.
+  - Absent attribute = unlimited; `0` = block all.
+  - Period = UTC `YYYY-MM` string (natural monthly rollover).
+  - Status: `active` / `revoked` with `revoked_at` timestamp; no hard-delete.
+  - GSI on `owner` (range `created_at`) for CLI `list` efficiency.
+  - PITR + SSE on `tokens` and `usage`; `rate_limit` is ephemeral
+    (no PITR, no deletion protection — so `terraform destroy` works).
+- **Files added:** [T03_PLAN.md](./T03_PLAN.md), [terraform/main/modules/data/main.tf](./terraform/main/modules/data/main.tf),
+  [variables.tf](./terraform/main/modules/data/variables.tf),
+  [outputs.tf](./terraform/main/modules/data/outputs.tf),
+  [versions.tf](./terraform/main/modules/data/versions.tf),
+  [README.md](./terraform/main/modules/data/README.md) (365 lines —
+  authoritative for T04 + T06 implementation).
