@@ -134,3 +134,24 @@ to keep momentum. Will return to Copilot for T07 once it resets.
   root module + `modules/proxy/` (Lambda + IAM + log group) + `modules/api/`
   (HTTP API v2 + stage + access logs + optional custom domain).
   Also [T05_PLAN.md](./T05_PLAN.md).
+
+## T06 — Admin CLI
+
+- **Tier:** medium
+- **Agent:** Claude (`claude -p`, model `claude-sonnet-4-6`)
+- **Plan/review rounds:** 1 plan round (actionable findings → plan updated),
+  1 impl round (5 actionable fixes: broken period in test, dead variable,
+  missing test, TOKEN_ID column width, `list` enriched with usage via
+  `batch_get_item`).
+- **Outcome:** ✅ pass — `make lint test` exit 0, 40/40 tests pass
+  (27 new CLI + 13 existing).
+- **Notable:** CLI hashing matches `lambda/proxy/auth.py:verify_secret`
+  exactly — no schema drift. Empty `--models` removes the attribute (avoids
+  invalid empty DynamoDB string set). Single `UpdateItem` with combined
+  SET/REMOVE expressions for `set-limit`.
+- **Files added:** [T06_PLAN.md](./T06_PLAN.md),
+  [cli/bedrock_api/cli.py](./cli/bedrock_api/cli.py) (428 lines),
+  [tokens.py](./cli/bedrock_api/tokens.py),
+  [formatting.py](./cli/bedrock_api/formatting.py),
+  [cli/README.md](./cli/README.md),
+  6 new test files in [tests/cli/](./tests/cli/) covering every subcommand.
