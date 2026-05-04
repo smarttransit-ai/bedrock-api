@@ -314,8 +314,8 @@ as Terraform variables — do **not** hard-code here):
 
 | Model | Cross-region inference profile ID |
 |---|---|
-| Claude Sonnet 4.6 | `us.anthropic.claude-sonnet-4-6-20250514-v1:0` |
-| Claude Haiku 4.5 | `us.anthropic.claude-haiku-4-5-20250207-v1:0` |
+| Claude Sonnet 4.6 | `us.anthropic.claude-sonnet-4-6` |
+| Claude Haiku 4.5 | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
 
 T05 must expose these as a `default_allowed_models` variable (type
 `list(string)`) so they can be overridden without code changes. T06 `issue`

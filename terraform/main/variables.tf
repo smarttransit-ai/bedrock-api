@@ -14,8 +14,8 @@ variable "model_allowlist" {
   description = "List of Bedrock cross-region inference profile IDs the Lambda may invoke. IDs match the pricing map in lambda/proxy/pricing.py."
   type        = list(string)
   default = [
-    "us.anthropic.claude-sonnet-4-6-20250514-v1:0",
-    "us.anthropic.claude-haiku-4-5-20250207-v1:0",
+    "us.anthropic.claude-sonnet-4-6",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
   ]
 }
 

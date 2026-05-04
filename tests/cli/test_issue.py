@@ -21,7 +21,7 @@ def test_issue_happy_path(run_cli, tables):
             "--max-output-tokens",
             "2000",
             "--models",
-            "us.anthropic.claude-sonnet-4-6-20250514-v1:0",
+            "us.anthropic.claude-sonnet-4-6",
             "--note",
             "grad student",
         ]
@@ -43,7 +43,7 @@ def test_issue_happy_path(run_cli, tables):
     assert item["limit_monthly_requests"] == 1000
     assert item["limit_max_input_tokens"] == 4000
     assert item["limit_max_output_tokens"] == 2000
-    assert item["allowed_models"] == {"us.anthropic.claude-sonnet-4-6-20250514-v1:0"}
+    assert item["allowed_models"] == {"us.anthropic.claude-sonnet-4-6"}
     assert item["note"] == "grad student"
     assert "secret_hash" in item
     assert "secret" not in item  # raw secret never stored

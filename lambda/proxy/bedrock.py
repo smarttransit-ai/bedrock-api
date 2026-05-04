@@ -18,7 +18,7 @@ def parse_route(event: dict) -> tuple[str, str]:
     Expected path: /model/{url-encoded-model-id}/converse
                 or /model/{url-encoded-model-id}/invoke
 
-    Model IDs contain colons (e.g. us.anthropic.claude-sonnet-4-6-20250514-v1:0)
+    Model IDs contain colons (e.g. us.anthropic.claude-sonnet-4-6)
     which are percent-encoded as %3A by clients. urllib.parse.unquote decodes them.
 
     Converse API is the primary path for all supported models.

@@ -30,7 +30,7 @@ bedrock-api issue alice \
   --monthly-requests 1000 \
   --max-input-tokens 4000 \
   --max-output-tokens 4000 \
-  --models us.anthropic.claude-sonnet-4-6-20250514-v1:0,us.anthropic.claude-haiku-4-5-20250207-v1:0 \
+  --models us.anthropic.claude-sonnet-4-6,us.anthropic.claude-haiku-4-5-20251001-v1:0 \
   --note "grad student" \
   > token.txt
 
@@ -81,7 +81,7 @@ bedrock-api set-limit bk_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 --budget 25.00 --rps 1
 
 # Restrict models
 bedrock-api set-limit bk_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 \
-  --models us.anthropic.claude-haiku-4-5-20250207-v1:0
+  --models us.anthropic.claude-haiku-4-5-20251001-v1:0
 
 # Remove model restriction (pass empty string to REMOVE the attribute)
 bedrock-api set-limit bk_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 --models ""

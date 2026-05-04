@@ -37,8 +37,8 @@ from moto import mock_aws
 TOKENS_TABLE = os.environ["TOKENS_TABLE"]
 USAGE_TABLE = os.environ["USAGE_TABLE"]
 RATE_LIMIT_TABLE = os.environ["RATE_LIMIT_TABLE"]
-DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6-20250514-v1:0"
-ENCODED_MODEL = "us.anthropic.claude-sonnet-4-6-20250514-v1%3A0"
+DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
+ENCODED_MODEL = "us.anthropic.claude-sonnet-4-6"
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ REGION = os.getenv("BEDROCK_API_REGION", "us-east-1")
 TABLE_PREFIX = os.getenv("BEDROCK_API_TABLE_PREFIX", "bedrock-api")
 MODEL_ID = os.getenv(
     "BEDROCK_API_MODEL_ID",
-    "us.anthropic.claude-sonnet-4-6-20250514-v1:0",
+    "us.anthropic.claude-sonnet-4-6",
 )
 
 # Minimal Converse request body

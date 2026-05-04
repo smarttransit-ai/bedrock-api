@@ -19,8 +19,8 @@ Model IDs contain colons (`:`), which must be percent-encoded as `%3A`:
 
 | Model | Path segment |
 |---|---|
-| `us.anthropic.claude-sonnet-4-6-20250514-v1:0` | `us.anthropic.claude-sonnet-4-6-20250514-v1%3A0` |
-| `us.anthropic.claude-haiku-4-5-20250207-v1:0` | `us.anthropic.claude-haiku-4-5-20250207-v1%3A0` |
+| `us.anthropic.claude-sonnet-4-6` | `us.anthropic.claude-sonnet-4-6` |
+| `us.anthropic.claude-haiku-4-5-20251001-v1:0` | `us.anthropic.claude-haiku-4-5-20251001-v1%3A0` |
 
 ---
 
@@ -29,7 +29,7 @@ Model IDs contain colons (`:`), which must be percent-encoded as `%3A`:
 ```bash
 API_URL="https://abc123.execute-api.us-east-1.amazonaws.com"
 TOKEN="bk_<32hex>.<64hex>"
-MODEL="us.anthropic.claude-sonnet-4-6-20250514-v1%3A0"
+MODEL="us.anthropic.claude-sonnet-4-6"
 
 curl -s -X POST "${API_URL}/model/${MODEL}/converse" \
   -H "Authorization: Bearer ${TOKEN}" \
@@ -51,7 +51,7 @@ import httpx
 
 API_URL = "https://abc123.execute-api.us-east-1.amazonaws.com"
 TOKEN = "bk_<32hex>.<64hex>"
-MODEL_ID = "us.anthropic.claude-sonnet-4-6-20250514-v1:0"
+MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 url = f"{API_URL}/model/{quote(MODEL_ID, safe='')}/converse"
 
@@ -100,7 +100,7 @@ def _add_bearer(request, **kwargs):
 client.meta.events.register("before-send.bedrock-runtime.*", _add_bearer)
 
 response = client.converse(
-    modelId="us.anthropic.claude-sonnet-4-6-20250514-v1:0",
+    modelId="us.anthropic.claude-sonnet-4-6",
     messages=[
         {"role": "user", "content": [{"type": "text", "text": "Hello!"}]}
     ],
