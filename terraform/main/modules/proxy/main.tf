@@ -1,3 +1,5 @@
+data "aws_caller_identity" "current" {}
+
 # ---------------------------------------------------------------------------
 # Lambda source archive
 # output_path is in this module's directory (always exists on checkout).
@@ -61,12 +63,27 @@ resource "aws_iam_role_policy" "lambda" {
         Resource = [var.rate_limit_table_arn]
       },
       {
-        Sid    = "Bedrock"
+        Sid    = "BedrockInferenceProfile"
         Effect = "Allow"
         # bedrock:InvokeModel covers converse(), invoke_model(), and all
         # Bedrock invocation APIs. bedrock:Converse is not a valid IAM action.
+        # Inference profile ARNs include the account ID.
+        Action = ["bedrock:InvokeModel"]
+        Resource = [
+          for m in var.model_allowlist :
+          "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/${m}"
+        ]
+      },
+      {
+        Sid    = "BedrockFoundationModels"
+        Effect = "Allow"
+        # Cross-region inference profiles dispatch to underlying foundation
+        # models in multiple regions; each call also evaluates IAM against
+        # the foundation-model ARN. Anthropic-only is the per-vendor gate;
+        # the per-token allowlist is the real access-control gate, enforced
+        # by the Lambda before the call.
         Action   = ["bedrock:InvokeModel"]
-        Resource = [for m in var.model_allowlist : "arn:aws:bedrock:${var.region}::inference-profile/${m}"]
+        Resource = ["arn:aws:bedrock:*::foundation-model/anthropic.*"]
       },
       {
         Sid    = "CloudWatchLogs"
