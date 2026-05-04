@@ -4,8 +4,6 @@ A Terraform-deployed AWS API Gateway → Lambda proxy that fronts AWS Bedrock
 with per-token authentication, rate limits, monthly request quotas, monthly
 USD budgets, input/output token caps, and per-model allowlists.
 
-- **[GOALS.md](./GOALS.md)** — design decisions and requirements
-
 ---
 
 ## Prerequisites
@@ -72,13 +70,35 @@ Note the `api_url` output — this is the endpoint clients call.
 
 ## Install the admin CLI
 
-From the repository root:
+The `bedrock-api` admin CLI ships as a Python package in this repo. Pick
+whichever installer you prefer.
+
+### uv (recommended — isolates the CLI in its own environment)
 
 ```bash
-pip install -e ".[dev]"
+# Install once, available on PATH everywhere:
+uv tool install git+https://github.com/smarttransit-ai/bedrock-api.git
+
+# …or run a one-off without installing:
+uvx --from git+https://github.com/smarttransit-ai/bedrock-api.git bedrock-api --help
 ```
 
-The `bedrock-api` command is now available. Verify:
+### pip
+
+```bash
+pip install git+https://github.com/smarttransit-ai/bedrock-api.git
+```
+
+### From a local checkout (for development on the CLI itself)
+
+```bash
+git clone https://github.com/smarttransit-ai/bedrock-api.git
+cd bedrock-api
+pip install -e ".[dev]"   # adds pytest, ruff, moto, httpx
+```
+
+Pin to a specific commit or tag with `...bedrock-api.git@<commit-or-tag>`.
+Verify in any terminal:
 
 ```bash
 bedrock-api --help
