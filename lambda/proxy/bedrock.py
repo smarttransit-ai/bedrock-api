@@ -1,7 +1,7 @@
 import json
 from urllib.parse import unquote
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ParamValidationError
 
 
 class BedrockError(Exception):
@@ -72,6 +72,8 @@ def forward_converse(client, model_id: str, body: dict) -> tuple[dict, int, int]
     kwargs = {k: v for k, v in body.items() if k != "modelId"}
     try:
         response = client.converse(modelId=model_id, **kwargs)
+    except ParamValidationError as exc:
+        raise BedrockError("BAD_REQUEST", f"Invalid request body: {exc}", 400) from exc
     except ClientError as exc:
         _raise_bedrock_error(exc)
     response.pop("ResponseMetadata", None)
@@ -93,6 +95,8 @@ def forward_invoke_model(client, model_id: str, body: dict) -> tuple[dict, int, 
             contentType="application/json",
             accept="application/json",
         )
+    except ParamValidationError as exc:
+        raise BedrockError("BAD_REQUEST", f"Invalid request body: {exc}", 400) from exc
     except ClientError as exc:
         _raise_bedrock_error(exc)
     response_body = json.loads(response["body"].read())
