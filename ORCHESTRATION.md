@@ -81,3 +81,33 @@ is tight, Copilot is wide open and the user requested it.
   [versions.tf](./terraform/main/modules/data/versions.tf),
   [README.md](./terraform/main/modules/data/README.md) (365 lines —
   authoritative for T04 + T06 implementation).
+
+## T04 — Bedrock proxy Lambda
+
+- **Tier:** high
+- **Agent:** Copilot, `claude-sonnet-4.6`, `--effort high`
+- **Plan/review rounds:** plan converged in 1 round; impl review loop CUT
+  SHORT by burst rate limit before round-1 reviewer findings could be
+  adjudicated.
+- **Reviewer hallucination:** round-1 reviewers flagged "schema mismatch"
+  claiming the tokens table used `revoked` (BOOL) and the usage table used
+  `request_count`. Orchestrator verified against
+  [terraform/main/modules/data/README.md](./terraform/main/modules/data/README.md)
+  — schema actually uses `status` (S, "active"|"revoked") and `requests` (N).
+  Round-1 code matches the real schema; reviewer findings were rejected.
+  Crucially, Copilot crashed *before* applying any reviewer "fixes," so no
+  bad mutations landed.
+- **Cost:** 1 premium request, 20m 53s, ↑3.6m / ↓88.5k tokens (3.3m cached).
+  Then exit code 1 with "rate limit, reset 2h 45min" (burst limit, not the
+  monthly quota — monthly quota still ~3% used).
+- **Outcome:** ✅ committed by orchestrator after verification. `make lint
+  test` clean: 11/11 pass (10 lambda/proxy + 1 smoke).
+- **Files added:** [T04_PLAN.md](./T04_PLAN.md),
+  [lambda/proxy/handler.py](./lambda/proxy/handler.py) (224 lines),
+  [auth.py](./lambda/proxy/auth.py), [limits.py](./lambda/proxy/limits.py),
+  [bedrock.py](./lambda/proxy/bedrock.py),
+  [pricing.py](./lambda/proxy/pricing.py),
+  [README.md](./lambda/proxy/README.md),
+  [requirements.txt](./lambda/proxy/requirements.txt),
+  [tests/lambda/proxy/conftest.py](./tests/lambda/proxy/conftest.py),
+  [test_handler.py](./tests/lambda/proxy/test_handler.py) (10 tests).
