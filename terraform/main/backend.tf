@@ -1,20 +1,9 @@
-# ---------------------------------------------------------------------------
-# Remote state backend (S3 + DynamoDB locking).
-#
-# Fill in the values from `terraform/bootstrap/` outputs BEFORE running
-# `terraform init` for the first time:
-#
-#   cd terraform/bootstrap
-#   terraform output -raw backend_block
-#
-# Paste the printed block here, replacing the PLACEHOLDER values below.
-# ---------------------------------------------------------------------------
 terraform {
   backend "s3" {
-    bucket         = "PLACEHOLDER-state-bucket-name"
+    bucket         = "bedrock-api-tfstate-22178a0f"
     key            = "bedrock-api/terraform.tfstate"
-    region         = "PLACEHOLDER-region"
-    dynamodb_table = "PLACEHOLDER-lock-table-name"
+    region         = "us-east-1"
+    dynamodb_table = "bedrock-api-tfstate-lock"
     encrypt        = true
   }
 }

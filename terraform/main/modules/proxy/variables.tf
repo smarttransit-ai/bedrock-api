@@ -3,11 +3,6 @@ variable "name_prefix" {
   type        = string
 }
 
-variable "region" {
-  description = "AWS region (used in Bedrock IAM resource ARNs)."
-  type        = string
-}
-
 variable "lambda_source_dir" {
   description = "Absolute path to the lambda/proxy/ source directory."
   type        = string
@@ -29,11 +24,6 @@ variable "log_retention_days" {
   description = "CloudWatch log group retention in days."
   type        = number
   default     = 14
-}
-
-variable "model_allowlist" {
-  description = "Bedrock cross-region inference profile IDs that the Lambda may invoke. Used to scope the Bedrock IAM policy."
-  type        = list(string)
 }
 
 variable "allowed_models_default" {

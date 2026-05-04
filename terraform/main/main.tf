@@ -7,12 +7,10 @@ module "proxy" {
   source = "./modules/proxy"
 
   name_prefix            = var.name_prefix
-  region                 = var.region
   lambda_source_dir      = "${path.module}/../../lambda/proxy"
   lambda_memory_mb       = var.lambda_memory_mb
   lambda_timeout_s       = var.lambda_timeout_s
   log_retention_days     = var.log_retention_days
-  model_allowlist        = var.model_allowlist
   allowed_models_default = var.default_models
 
   tokens_table_name     = module.data.tokens_table_name
