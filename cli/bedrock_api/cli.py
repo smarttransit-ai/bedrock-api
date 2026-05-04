@@ -348,7 +348,13 @@ def build_parser():
     # issue
     p_issue = sub.add_parser("issue", help="Issue a new API token")
     p_issue.add_argument("owner", help="Owner label (e.g. 'alice')")
-    p_issue.add_argument("--budget", type=float, help="Monthly USD budget")
+    p_issue.add_argument(
+        "--budget",
+        type=float,
+        default=200.0,
+        help="Monthly USD budget (default: 200.0). Pass 0 to block all calls; "
+        "truly unlimited requires manual DynamoDB edit.",
+    )
     p_issue.add_argument("--rps", type=int, help="Requests per second cap")
     p_issue.add_argument(
         "--monthly-requests", type=int, dest="monthly_requests", help="Monthly request quota"
