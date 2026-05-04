@@ -155,3 +155,36 @@ to keep momentum. Will return to Copilot for T07 once it resets.
   [formatting.py](./cli/bedrock_api/formatting.py),
   [cli/README.md](./cli/README.md),
   6 new test files in [tests/cli/](./tests/cli/) covering every subcommand.
+
+## T07 — End-to-end smoke test + docs
+
+- **Tier:** low
+- **Agent:** Claude (`claude -p`, model `claude-sonnet-4-6`)
+- **Outcome:** ✅ pass — `make lint test` 40 passed + 1 skipped (e2e skips
+  cleanly without `E2E=1`); `terraform fmt -check -recursive` exit 0.
+- **Notable:** verified the actual Lambda route shape
+  (`/model/{encoded_model_id}/converse`) by reading `bedrock.py:parse_route`
+  rather than trusting the task spec's `/converse` shorthand. Docs match
+  reality.
+- **Files added:** [tests/e2e/test_smoke.py](./tests/e2e/test_smoke.py) (115 lines, skip-flagged),
+  [docs/clients.md](./docs/clients.md) (curl + httpx + boto3 examples).
+  Modified: [Makefile](./Makefile) (added `e2e` target),
+  [pyproject.toml](./pyproject.toml) (httpx in dev extras),
+  [README.md](./README.md) (full operator workflow replacing stub).
+
+---
+
+## Summary
+
+| # | Task | Tier | Agent | Plan rounds | Impl rounds | Outcome |
+|---|---|---|---|---|---|---|
+| T01 | Repo scaffolding | low | Copilot sonnet-4.6 | combined | combined | ✅ |
+| T02 | TF state bootstrap | medium | Copilot sonnet-4.6 | 1 | 5 | ✅ |
+| T03 | DynamoDB schema | high | Copilot sonnet-4.6 high | 1 | 2 | ✅ |
+| T04 | Bedrock proxy Lambda | high | Copilot sonnet-4.6 high | 1 | 1 (cut) | ✅ committed by orchestrator after schema verification |
+| T05 | APIGW + Lambda + IAM TF | medium | Claude sonnet-4-6 | 1 | 1 | ✅ |
+| T06 | Admin CLI | medium | Claude sonnet-4-6 | 1 | 1 | ✅ |
+| T07 | E2E smoke + docs | low | Claude sonnet-4-6 | combined | combined | ✅ |
+
+Final test suite: 40 passing + 1 skipped (e2e).
+TF: `fmt` clean across all modules; `validate` clean for `bootstrap` and `main`.
