@@ -37,3 +37,20 @@ is tight, Copilot is wide open and the user requested it.
   [tests/test_smoke.py](./tests/test_smoke.py), [T01_PLAN.md](./T01_PLAN.md),
   placeholder `.gitkeep` files in `terraform/{bootstrap,main}/`,
   `lambda/proxy/`, `cli/bedrock_api/`, `bin/`.
+
+## T02 — Terraform state backend bootstrap
+
+- **Tier:** medium
+- **Agent:** Copilot, `claude-sonnet-4.6`, `--effort medium`
+- **Plan/review rounds:** plan converged in 1 round; impl review ran 5 rounds (force_destroy debate, lifecycle filter, deletion_protection)
+- **Cost:** 1 premium request, 21m 27s, ↑4.7m / ↓86.3k tokens (4.5m cached)
+- **Outcome:** ✅ pass — `terraform fmt -check -recursive` and
+  `terraform -chdir=terraform/bootstrap validate` both exit 0 (with TF 1.9).
+- **Notable additions beyond spec:** TLS-only bucket policy, `prevent_destroy`
+  lifecycle on bucket, AWS-level `deletion_protection_enabled` on lock table,
+  `force_destroy` deliberately omitted.
+- **Files added:** [T02_PLAN.md](./T02_PLAN.md), [terraform/bootstrap/main.tf](./terraform/bootstrap/main.tf),
+  [terraform/bootstrap/variables.tf](./terraform/bootstrap/variables.tf),
+  [terraform/bootstrap/outputs.tf](./terraform/bootstrap/outputs.tf),
+  [terraform/bootstrap/versions.tf](./terraform/bootstrap/versions.tf),
+  [terraform/bootstrap/README.md](./terraform/bootstrap/README.md).
