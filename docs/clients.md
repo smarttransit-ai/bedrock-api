@@ -36,7 +36,7 @@ curl -s -X POST "${API_URL}/model/${MODEL}/converse" \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [
-      {"role": "user", "content": [{"type": "text", "text": "Hello!"}]}
+      {"role": "user", "content": [{"text": "Hello!"}]}
     ]
   }' | jq .
 ```
@@ -60,7 +60,7 @@ response = httpx.post(
     headers={"Authorization": f"Bearer {TOKEN}"},
     json={
         "messages": [
-            {"role": "user", "content": [{"type": "text", "text": "Hello!"}]}
+            {"role": "user", "content": [{"text": "Hello!"}]}
         ]
     },
     timeout=30.0,
@@ -102,7 +102,7 @@ client.meta.events.register("before-send.bedrock-runtime.*", _add_bearer)
 response = client.converse(
     modelId="us.anthropic.claude-sonnet-4-6",
     messages=[
-        {"role": "user", "content": [{"type": "text", "text": "Hello!"}]}
+        {"role": "user", "content": [{"text": "Hello!"}]}
     ],
 )
 print(response["output"]["message"]["content"][0]["text"])
@@ -125,7 +125,7 @@ stripped). For the Converse API:
   "output": {
     "message": {
       "role": "assistant",
-      "content": [{"type": "text", "text": "Hello!"}]
+      "content": [{"text": "Hello!"}]
     }
   },
   "stopReason": "end_turn",

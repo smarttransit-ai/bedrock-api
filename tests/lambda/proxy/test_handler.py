@@ -8,6 +8,7 @@ import json
 import time
 from datetime import UTC
 
+from botocore.exceptions import ParamValidationError
 from conftest import (
     ENCODED_MODEL,
     converse_response,
@@ -312,7 +313,30 @@ def test_bedrock_throttle(test_token, bedrock_stub):
 
 
 # ---------------------------------------------------------------------------
-# Test 10: usage ADD failure → still 200, error logged
+# Test 10: invalid Bedrock request body → 400 BAD_REQUEST
+# ---------------------------------------------------------------------------
+
+
+def test_bedrock_param_validation_maps_to_bad_request(test_token):
+    """Bedrock SDK parameter validation errors are mapped to 400 BAD_REQUEST."""
+    _, bearer_token, tables = test_token
+
+    class _ClientWithInvalidParams:
+        def converse(self, **kwargs):
+            raise ParamValidationError(report="Missing required parameter: messages")
+
+    event = make_event(
+        _converse_path(), {"messages": [{"role": "user", "content": []}]}, bearer_token
+    )
+
+    resp = handler(event, None, _bedrock_client=_ClientWithInvalidParams(), _tables=tables)
+
+    assert resp["statusCode"] == 400
+    assert json.loads(resp["body"])["error"]["code"] == "BAD_REQUEST"
+
+
+# ---------------------------------------------------------------------------
+# Test 11: usage ADD failure → still 200, error logged
 # ---------------------------------------------------------------------------
 
 

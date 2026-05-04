@@ -169,7 +169,7 @@ MODEL="us.anthropic.claude-sonnet-4-6"
 curl -s -X POST "${API_URL}/model/${MODEL}/converse" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":[{"type":"text","text":"Hello!"}]}]}' \
+  -d '{"messages":[{"role":"user","content":[{"text":"Hello!"}]}]}' \
   | jq .output.message.content[0].text
 ```
 
