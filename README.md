@@ -5,7 +5,6 @@ with per-token authentication, rate limits, monthly request quotas, monthly
 USD budgets, input/output token caps, and per-model allowlists.
 
 - **[GOALS.md](./GOALS.md)** — design decisions and requirements
-- **[ORCHESTRATION.md](./ORCHESTRATION.md)** — build log
 
 ---
 
