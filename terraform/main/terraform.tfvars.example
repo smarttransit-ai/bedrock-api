@@ -1,0 +1,16 @@
+region             = "us-east-1"
+name_prefix        = "bedrock-api"
+log_retention_days = 14
+lambda_memory_mb   = 512
+lambda_timeout_s   = 60
+default_models     = ""
+
+# Restrict to specific models (defaults shown — edit to limit further):
+# model_allowlist = [
+#   "us.anthropic.claude-sonnet-4-6-20250514-v1:0",
+#   "us.anthropic.claude-haiku-4-5-20250207-v1:0",
+# ]
+
+# Custom domain (requires hosted_zone_id):
+# domain_name    = "api.example.com"
+# hosted_zone_id = "Z1234567890ABC"
