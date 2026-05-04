@@ -98,6 +98,10 @@ resource "aws_lambda_function" "proxy" {
   memory_size      = var.lambda_memory_mb
   timeout          = var.lambda_timeout_s
 
+  # Caps blast radius from any high-rate flood. Account default is 1000;
+  # 50 is generous for lab-scale interactive use. Bump to 100 for batch jobs.
+  reserved_concurrent_executions = var.lambda_reserved_concurrency
+
   environment {
     variables = {
       TOKENS_TABLE           = var.tokens_table_name

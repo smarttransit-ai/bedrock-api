@@ -21,9 +21,13 @@ resource "aws_apigatewayv2_integration" "lambda" {
   payload_format_version = "2.0"
 }
 
+# Narrow route: only POST /model/* reaches the Lambda. Anything else (GET /,
+# OPTIONS, scanner traffic, wrong methods) gets 404 directly from API Gateway
+# with no Lambda invocation and no DynamoDB read. This is the cheapest defense
+# against unauthenticated probe/scan traffic.
 resource "aws_apigatewayv2_route" "proxy" {
   api_id    = aws_apigatewayv2_api.main.id
-  route_key = "ANY /{proxy+}"
+  route_key = "POST /model/{proxy+}"
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 

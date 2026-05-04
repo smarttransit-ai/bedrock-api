@@ -20,6 +20,12 @@ variable "lambda_timeout_s" {
   default     = 60
 }
 
+variable "lambda_reserved_concurrency" {
+  description = "Reserved concurrent executions cap for the proxy Lambda. Caps blast radius from a flood; account default is 1000."
+  type        = number
+  default     = 50
+}
+
 variable "log_retention_days" {
   description = "CloudWatch log group retention in days."
   type        = number
