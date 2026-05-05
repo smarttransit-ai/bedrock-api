@@ -154,6 +154,49 @@ Authorization: Bearer bk_<32hex>.<64hex>
 
 ---
 
+## Generate a per-client doc
+
+`docs/clients.md` is the generic public reference. To produce a self-contained
+copy with the bearer token, API URL, and monthly budget pre-filled, render
+the template:
+
+```bash
+./scripts/render-client-doc.sh \
+  --owner alice \
+  --token-id bk_<32hex> \
+  --bearer "$(cat token.txt)" \
+  --api-url "$(cd terraform/main && terraform output -raw api_url)" \
+  --budget 10.00 \
+  --rps 5 \
+  --models us.anthropic.claude-sonnet-4-6 \
+  > docs/clients-alice.md
+```
+
+`--owner`, `--token-id`, `--bearer`, and `--api-url` are required. Limit
+flags (`--budget`, `--rps`, `--monthly-requests`, `--max-input-tokens`,
+`--max-output-tokens`, `--models`) are optional — pass whichever you want
+in the doc. Unset limits render as `unlimited` (or `all` for models).
+
+To skip retyping limits, pass `--lookup` and the script will fetch them
+directly from the tokens DynamoDB table (requires `aws` and `jq` on PATH;
+honors `AWS_PROFILE` and `AWS_REGION`). Explicit flags override the
+looked-up values.
+
+```bash
+AWS_PROFILE=admin ./scripts/render-client-doc.sh \
+  --owner alice \
+  --token-id bk_<32hex> \
+  --bearer "$(cat token.txt)" \
+  --api-url "$(cd terraform/main && terraform output -raw api_url)" \
+  --lookup \
+  > docs/clients-alice.md
+```
+
+Hand `docs/clients-alice.md` to the lab member alongside (or instead of)
+the raw token.
+
+---
+
 ## First API call
 
 See **[docs/clients.md](./docs/clients.md)** for copy-pasteable examples
