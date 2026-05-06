@@ -294,18 +294,18 @@ DEFAULT_PRICING: dict[str, dict[str, dict[str, int]]] = {
     },  # $5/$25 per 1M
     "anthropic.claude-opus-4-7": {
         "on_demand": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 75000,
-            "cache_write_input_usd_micros_per_1k": 75000,
+            "input_usd_micros_per_1k": 5000,
+            "output_usd_micros_per_1k": 25000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6250,
         },
         "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 75000,
-            "cache_write_input_usd_micros_per_1k": 75000,
+            "input_usd_micros_per_1k": 5000,
+            "output_usd_micros_per_1k": 25000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6250,
         },
-    },  # $15/$75 per 1M
+    },  # $5/$25 per 1M
     "anthropic.claude-sonnet-4-20250514-v1:0": {
         "on_demand": {
             "input_usd_micros_per_1k": 3000,
@@ -490,18 +490,18 @@ DEFAULT_PRICING: dict[str, dict[str, dict[str, int]]] = {
     },  # $5/$25 per 1M
     "global.anthropic.claude-opus-4-7": {
         "on_demand": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 75000,
-            "cache_write_input_usd_micros_per_1k": 75000,
+            "input_usd_micros_per_1k": 5000,
+            "output_usd_micros_per_1k": 25000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6250,
         },
         "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 75000,
-            "cache_write_input_usd_micros_per_1k": 75000,
+            "input_usd_micros_per_1k": 5000,
+            "output_usd_micros_per_1k": 25000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6250,
         },
-    },  # $15/$75 per 1M
+    },  # $5/$25 per 1M
     "global.anthropic.claude-sonnet-4-20250514-v1:0": {
         "on_demand": {
             "input_usd_micros_per_1k": 3000,
@@ -1386,18 +1386,18 @@ DEFAULT_PRICING: dict[str, dict[str, dict[str, int]]] = {
     },  # $5/$25 per 1M
     "us.anthropic.claude-opus-4-7": {
         "on_demand": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 75000,
-            "cache_write_input_usd_micros_per_1k": 75000,
+            "input_usd_micros_per_1k": 5000,
+            "output_usd_micros_per_1k": 25000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6250,
         },
         "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 75000,
-            "cache_write_input_usd_micros_per_1k": 75000,
+            "input_usd_micros_per_1k": 5000,
+            "output_usd_micros_per_1k": 25000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6250,
         },
-    },  # $15/$75 per 1M
+    },  # $5/$25 per 1M
     "us.anthropic.claude-sonnet-4-20250514-v1:0": {
         "on_demand": {
             "input_usd_micros_per_1k": 3000,
