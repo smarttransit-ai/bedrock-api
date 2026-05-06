@@ -47,6 +47,45 @@ Model IDs contain colons (`:`), which must be percent-encoded as `%3A`:
 
 ---
 
+## Checking your usage
+
+You can query your current-period usage, configured limits, and remaining budget at any time:
+
+```bash
+curl -s -H "Authorization: Bearer {{BEARER_TOKEN}}" {{API_URL}}/usage | jq .
+```
+
+Example response:
+
+```json
+{
+  "period": "2026-05",
+  "usage": {
+    "requests": 42,
+    "input_tokens": 18400,
+    "output_tokens": 7200,
+    "cache_read_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "usd_micros": 312000
+  },
+  "limits": {
+    "monthly_requests": null,
+    "monthly_usd_micros": 300000000,
+    "max_input_tokens": null,
+    "max_output_tokens": null,
+    "rps": null
+  },
+  "remaining": {
+    "usd_micros": 299688000
+  }
+}
+```
+
+`null` means no limit is configured. `remaining` only appears for dimensions that have a limit set.
+`usd_micros` is USD × 1 000 000 (e.g. 312000 µUSD = $0.312).
+
+---
+
 ## curl
 
 ```bash
