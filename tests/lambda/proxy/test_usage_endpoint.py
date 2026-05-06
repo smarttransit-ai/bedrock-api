@@ -67,11 +67,11 @@ def test_no_usage_no_limits(test_token):
         "output_tokens": 0,
         "cache_read_input_tokens": 0,
         "cache_write_input_tokens": 0,
-        "usd_micros": 0,
+        "usd": 0.0,
     }
     assert body["limits"] == {
         "monthly_requests": None,
-        "monthly_usd_micros": None,
+        "monthly_usd": None,
         "max_input_tokens": None,
         "max_output_tokens": None,
         "rps": None,
@@ -106,12 +106,12 @@ def test_with_usage_and_limits(test_token):
         "output_tokens": 7200,
         "cache_read_input_tokens": 3100,
         "cache_write_input_tokens": 800,
-        "usd_micros": 312000,
+        "usd": 0.312,
     }
     assert body["limits"]["monthly_requests"] == 500
-    assert body["limits"]["monthly_usd_micros"] == 5_000_000
+    assert body["limits"]["monthly_usd"] == 5.0
     assert body["remaining"]["requests"] == 458
-    assert body["remaining"]["usd_micros"] == 4_688_000
+    assert body["remaining"]["usd"] == 4.688
 
 
 def test_remaining_clamped_to_zero(test_token):
@@ -126,7 +126,7 @@ def test_remaining_clamped_to_zero(test_token):
     assert resp["statusCode"] == 200
     body = json.loads(resp["body"])
     assert body["remaining"]["requests"] == 0
-    assert "usd_micros" not in body["remaining"]
+    assert "usd" not in body["remaining"]
 
 
 def test_only_one_monthly_limit(test_token):
@@ -140,7 +140,7 @@ def test_only_one_monthly_limit(test_token):
 
     assert resp["statusCode"] == 200
     body = json.loads(resp["body"])
-    assert "usd_micros" in body["remaining"]
+    assert "usd" in body["remaining"]
     assert "requests" not in body["remaining"]
 
 
@@ -162,7 +162,7 @@ def test_wrong_period_row_ignored(test_token):
     assert resp["statusCode"] == 200
     body = json.loads(resp["body"])
     assert body["usage"]["requests"] == 0
-    assert body["usage"]["usd_micros"] == 0
+    assert body["usage"]["usd"] == 0.0
 
 
 def test_invalid_token(test_token):

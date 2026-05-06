@@ -87,22 +87,28 @@ def _handle_usage(
     period = datetime.now(UTC).strftime("%Y-%m")
     item = usage_table.get_item(Key={"token_id": token_id, "period": period}).get("Item", {})
 
+    usd_micros_used = int(item.get("usd_micros", 0))
+
     usage = {
         "requests": int(item.get("requests", 0)),
         "input_tokens": int(item.get("input_tokens", 0)),
         "output_tokens": int(item.get("output_tokens", 0)),
         "cache_read_input_tokens": int(item.get("cache_read_input_tokens", 0)),
         "cache_write_input_tokens": int(item.get("cache_write_input_tokens", 0)),
-        "usd_micros": int(item.get("usd_micros", 0)),
+        "usd": round(usd_micros_used / 1_000_000, 6),
     }
 
     def _limit(attr: str):
         val = token_row.get(attr)
         return int(val) if val is not None else None
 
+    monthly_usd_micros_limit = _limit("limit_monthly_usd_micros")
+
     limits = {
         "monthly_requests": _limit("limit_monthly_requests"),
-        "monthly_usd_micros": _limit("limit_monthly_usd_micros"),
+        "monthly_usd": round(monthly_usd_micros_limit / 1_000_000, 6)
+        if monthly_usd_micros_limit is not None
+        else None,
         "max_input_tokens": _limit("limit_max_input_tokens"),
         "max_output_tokens": _limit("limit_max_output_tokens"),
         "rps": _limit("limit_rps"),
@@ -111,8 +117,8 @@ def _handle_usage(
     remaining = {}
     if limits["monthly_requests"] is not None:
         remaining["requests"] = max(0, limits["monthly_requests"] - usage["requests"])
-    if limits["monthly_usd_micros"] is not None:
-        remaining["usd_micros"] = max(0, limits["monthly_usd_micros"] - usage["usd_micros"])
+    if monthly_usd_micros_limit is not None:
+        remaining["usd"] = round(max(0, monthly_usd_micros_limit - usd_micros_used) / 1_000_000, 6)
 
     body: dict = {"period": period, "usage": usage, "limits": limits}
     if remaining:
