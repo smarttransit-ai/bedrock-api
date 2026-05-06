@@ -173,7 +173,13 @@ def make_event(
     }
 
 
-def converse_response(text: str = "Hello!", in_tokens: int = 10, out_tokens: int = 5) -> dict:
+def converse_response(
+    text: str = "Hello!",
+    in_tokens: int = 10,
+    out_tokens: int = 5,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+) -> dict:
     """Build a minimal Bedrock Converse API service response for the Stubber."""
     return {
         "output": {
@@ -186,6 +192,8 @@ def converse_response(text: str = "Hello!", in_tokens: int = 10, out_tokens: int
         "usage": {
             "inputTokens": in_tokens,
             "outputTokens": out_tokens,
+            "cacheReadInputTokens": cache_read_tokens,
+            "cacheWriteInputTokens": cache_write_tokens,
             "totalTokens": in_tokens + out_tokens,
         },
         "metrics": {"latencyMs": 50},

@@ -1,7 +1,10 @@
 import json
+import logging
 from urllib.parse import unquote
 
 from botocore.exceptions import ClientError, ParamValidationError
+
+logger = logging.getLogger(__name__)
 
 
 class BedrockError(Exception):
@@ -62,8 +65,69 @@ def apply_output_cap(body: dict, route: str, max_output_tokens: int | None) -> d
     return body
 
 
-def forward_converse(client, model_id: str, body: dict) -> tuple[dict, int, int]:
-    """Call Bedrock Converse API and return (response_body, input_tokens, output_tokens).
+def _parse_base10_int(value, field_name: str) -> int:
+    if isinstance(value, bool):
+        logger.warning(
+            json.dumps({"event": "usage_parse_warning", "field": field_name, "raw_value": value})
+        )
+        return 0
+    if isinstance(value, int):
+        return max(0, min(value, 9_223_372_036_854_775_807))
+    if isinstance(value, str):
+        if value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
+            parsed = int(value, 10)
+            return max(0, min(parsed, 9_223_372_036_854_775_807))
+    logger.warning(
+        json.dumps({"event": "usage_parse_warning", "field": field_name, "raw_value": value})
+    )
+    return 0
+
+
+def _extract_value(payload: dict, key_or_keys: str | list[str]):
+    if isinstance(key_or_keys, str):
+        return payload.get(key_or_keys, 0)
+    for key in key_or_keys:
+        if key in payload:
+            return payload.get(key, 0)
+    return 0
+
+
+def _has_key(payload: dict, key_or_keys: str | list[str]) -> bool:
+    if isinstance(key_or_keys, str):
+        return key_or_keys in payload
+    return any(key in payload for key in key_or_keys)
+
+
+def normalize_usage(
+    usage_payload: dict | None, key_map: dict[str, str | list[str]]
+) -> dict[str, int]:
+    if not isinstance(usage_payload, dict):
+        logger.warning(
+            json.dumps(
+                {"event": "usage_parse_warning", "field": "usage", "raw_value": usage_payload}
+            )
+        )
+        usage_payload = {}
+    return {
+        "input_tokens": _parse_base10_int(
+            _extract_value(usage_payload, key_map["input_tokens"]), "input_tokens"
+        ),
+        "output_tokens": _parse_base10_int(
+            _extract_value(usage_payload, key_map["output_tokens"]), "output_tokens"
+        ),
+        "cache_read_input_tokens": _parse_base10_int(
+            _extract_value(usage_payload, key_map["cache_read_input_tokens"]),
+            "cache_read_input_tokens",
+        ),
+        "cache_write_input_tokens": _parse_base10_int(
+            _extract_value(usage_payload, key_map["cache_write_input_tokens"]),
+            "cache_write_input_tokens",
+        ),
+    }
+
+
+def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str, int]]:
+    """Call Bedrock Converse API and return (response_body, normalized_usage).
 
     modelId is a path parameter for the SDK; strip it from the body kwargs if
     present to avoid a duplicate-parameter error.
@@ -77,12 +141,23 @@ def forward_converse(client, model_id: str, body: dict) -> tuple[dict, int, int]
     except ClientError as exc:
         _raise_bedrock_error(exc)
     response.pop("ResponseMetadata", None)
-    usage = response.get("usage") or {}
-    return response, int(usage.get("inputTokens", 0)), int(usage.get("outputTokens", 0))
+    usage = normalize_usage(
+        response.get("usage"),
+        {
+            "input_tokens": "inputTokens",
+            "output_tokens": "outputTokens",
+            "cache_read_input_tokens": ["cacheReadInputTokenCount", "cacheReadInputTokens"],
+            "cache_write_input_tokens": [
+                "cacheWriteInputTokenCount",
+                "cacheWriteInputTokens",
+            ],
+        },
+    )
+    return response, usage
 
 
-def forward_invoke_model(client, model_id: str, body: dict) -> tuple[dict, int, int]:
-    """Call Bedrock InvokeModel API and return (response_body, input_tokens, output_tokens).
+def forward_invoke_model(client, model_id: str, body: dict) -> tuple[dict, dict[str, int]]:
+    """Call Bedrock InvokeModel API and return (response_body, normalized_usage).
 
     Token usage is extracted using the Anthropic response format
     (response_body["usage"]["input_tokens"] / ["output_tokens"]).
@@ -100,10 +175,44 @@ def forward_invoke_model(client, model_id: str, body: dict) -> tuple[dict, int, 
     except ClientError as exc:
         _raise_bedrock_error(exc)
     response_body = json.loads(response["body"].read())
-    usage = response_body.get("usage") or {}
-    in_tokens = int(usage.get("input_tokens", 0))
-    out_tokens = int(usage.get("output_tokens", 0))
-    return response_body, in_tokens, out_tokens
+    usage = response_body.get("usage")
+    # Deterministic precedence:
+    # 1) Anthropic-native keys
+    # 2) Bedrock-style keys (if returned by wrapped providers)
+    anthropic = normalize_usage(
+        usage,
+        {
+            "input_tokens": "input_tokens",
+            "output_tokens": "output_tokens",
+            "cache_read_input_tokens": "cache_read_input_tokens",
+            "cache_write_input_tokens": "cache_creation_input_tokens",
+        },
+    )
+    bedrock_style = normalize_usage(
+        usage,
+        {
+            "input_tokens": "inputTokens",
+            "output_tokens": "outputTokens",
+            "cache_read_input_tokens": ["cacheReadInputTokenCount", "cacheReadInputTokens"],
+            "cache_write_input_tokens": ["cacheWriteInputTokenCount", "cacheWriteInputTokens"],
+        },
+    )
+    usage_dict = usage if isinstance(usage, dict) else {}
+    merged = {
+        "input_tokens": anthropic["input_tokens"]
+        if _has_key(usage_dict, "input_tokens")
+        else bedrock_style["input_tokens"],
+        "output_tokens": anthropic["output_tokens"]
+        if _has_key(usage_dict, "output_tokens")
+        else bedrock_style["output_tokens"],
+        "cache_read_input_tokens": anthropic["cache_read_input_tokens"]
+        if _has_key(usage_dict, "cache_read_input_tokens")
+        else bedrock_style["cache_read_input_tokens"],
+        "cache_write_input_tokens": anthropic["cache_write_input_tokens"]
+        if _has_key(usage_dict, "cache_creation_input_tokens")
+        else bedrock_style["cache_write_input_tokens"],
+    }
+    return response_body, merged
 
 
 def _raise_bedrock_error(exc: ClientError) -> None:

@@ -102,18 +102,21 @@ cached across warm Lambda invocations.
 
 ## Pricing
 
-`pricing.py` contains a static price map keyed by Bedrock inference-profile ID,
-in **integer USD-micros per 1,000 tokens** (no floats). Override at runtime via
-`PRICING_JSON`.
+`pricing.py` computes pricing by mode (`on_demand` or `batch`) and token class
+(`input`, `output`, `cache_read_input`, `cache_write_input`) in **integer USD-micros
+per 1,000 tokens** (no floats). Override at runtime via `PRICING_JSON`.
+
+Unknown model/mode/class mappings use conservative fallback rates and emit
+structured fallback warning events.
 
 Default models (prices from https://aws.amazon.com/bedrock/pricing/ on 2025-05-14):
 
 | Model | Input µUSD/1k | Output µUSD/1k |
 |---|---|---|
-| `us.anthropic.claude-sonnet-4-6` | 3 000 | 15 000 |
-| `us.anthropic.claude-haiku-4-5-20251001-v1:0` | 800 | 4 000 |
+| `us.anthropic.claude-sonnet-4-6` | 6 000 | 15 000 |
+| `us.anthropic.claude-haiku-4-5-20251001-v1:0` | 2 000 | 5 000 |
 
-Unknown models fall back to Sonnet 4.6 rates (conservative).
+Unknown models fall back to Opus-tier conservative rates.
 
 ---
 
@@ -153,10 +156,18 @@ All log lines are JSON to CloudWatch Logs. Fields:
 | `model_id` | Bedrock model/profile ID |
 | `input_tokens` | True count from Bedrock response |
 | `output_tokens` | True count from Bedrock response |
+| `cache_read_input_tokens` | Bedrock cache-read token count |
+| `cache_write_input_tokens` | Bedrock cache-write token count |
+| `pricing_mode` | `on_demand` or `batch` |
 | `usd_micros` | Integer cost for this request |
 | `status` | HTTP status code |
 | `latency_ms` | Wall-clock ms |
 | `error_code` | Present on rejections |
+
+Additional pricing audit records are emitted with:
+- `event=pricing_audit`
+- per-component micros
+- fallback flags and dimensions
 
 ---
 

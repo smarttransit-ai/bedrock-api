@@ -65,7 +65,45 @@ def test_happy_path(test_token, bedrock_stub):
     assert int(usage["requests"]) == 1
     assert int(usage["input_tokens"]) == 10
     assert int(usage["output_tokens"]) == 5
+    assert int(usage["cache_read_input_tokens"]) == 0
+    assert int(usage["cache_write_input_tokens"]) == 0
     assert int(usage["usd_micros"]) > 0
+
+
+def test_happy_path_with_cache_tokens(test_token, bedrock_stub):
+    token_id, bearer_token, tables = test_token
+    _, usage_table, _ = tables
+    client, stubber = bedrock_stub
+
+    stubber.add_response(
+        "converse",
+        converse_response(in_tokens=10, out_tokens=5, cache_read_tokens=100, cache_write_tokens=20),
+    )
+    event = _converse_event(bearer_token)
+    with stubber:
+        resp = handler(event, None, _bedrock_client=client, _tables=tables)
+
+    assert resp["statusCode"] == 200
+    usage = usage_table.get_item(Key={"token_id": token_id, "period": _current_period()}).get(
+        "Item", {}
+    )
+    assert int(usage["cache_read_input_tokens"]) == 100
+    assert int(usage["cache_write_input_tokens"]) == 20
+
+
+def test_invalid_pricing_mode_rejected(test_token, bedrock_stub):
+    token_id, bearer_token, tables = test_token
+    tokens_table, _, _ = tables
+    client, stubber = bedrock_stub
+    tokens_table.update_item(
+        Key={"token_id": token_id},
+        UpdateExpression="SET pricing_mode = :v",
+        ExpressionAttributeValues={":v": "oops"},
+    )
+    event = _converse_event(bearer_token)
+    with stubber:
+        resp = handler(event, None, _bedrock_client=client, _tables=tables)
+    assert resp["statusCode"] == 500
 
 
 # ---------------------------------------------------------------------------
