@@ -21,6 +21,105 @@ resource "aws_cloudwatch_log_group" "lambda" {
   retention_in_days = var.log_retention_days
 }
 
+resource "aws_cloudwatch_log_metric_filter" "pricing_fallback_count" {
+  name           = "${var.name_prefix}-pricing-fallback-count"
+  log_group_name = aws_cloudwatch_log_group.lambda.name
+  pattern        = "{ $.event = \"pricing_fallback_rate\" }"
+
+  metric_transformation {
+    name      = "PricingFallbackCount"
+    namespace = "${var.name_prefix}/proxy"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "pricing_mode_invalid" {
+  name           = "${var.name_prefix}-pricing-mode-invalid"
+  log_group_name = aws_cloudwatch_log_group.lambda.name
+  pattern        = "{ $.event = \"pricing_mode_invalid\" }"
+
+  metric_transformation {
+    name      = "PricingModeInvalidCount"
+    namespace = "${var.name_prefix}/proxy"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "request_complete_count" {
+  name           = "${var.name_prefix}-request-complete-count"
+  log_group_name = aws_cloudwatch_log_group.lambda.name
+  pattern        = "{ $.event = \"request_complete\" }"
+
+  metric_transformation {
+    name      = "RequestCompleteCount"
+    namespace = "${var.name_prefix}/proxy"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "pricing_mode_on_demand_count" {
+  name           = "${var.name_prefix}-pricing-mode-on-demand-count"
+  log_group_name = aws_cloudwatch_log_group.lambda.name
+  pattern        = "{ $.event = \"pricing_audit\" && $.pricing_mode = \"on_demand\" }"
+
+  metric_transformation {
+    name      = "PricingModeOnDemandCount"
+    namespace = "${var.name_prefix}/proxy"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "pricing_mode_batch_count" {
+  name           = "${var.name_prefix}-pricing-mode-batch-count"
+  log_group_name = aws_cloudwatch_log_group.lambda.name
+  pattern        = "{ $.event = \"pricing_audit\" && $.pricing_mode = \"batch\" }"
+
+  metric_transformation {
+    name      = "PricingModeBatchCount"
+    namespace = "${var.name_prefix}/proxy"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "pricing_fallback_high" {
+  alarm_name          = "${var.name_prefix}-pricing-fallback-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  metric_query {
+    id          = "fallbacks"
+    return_data = false
+    metric {
+      metric_name = "PricingFallbackCount"
+      namespace   = "${var.name_prefix}/proxy"
+      period      = 900
+      stat        = "Sum"
+    }
+  }
+  metric_query {
+    id          = "requests"
+    return_data = false
+    metric {
+      metric_name = "RequestCompleteCount"
+      namespace   = "${var.name_prefix}/proxy"
+      period      = 900
+      stat        = "Sum"
+    }
+  }
+  metric_query {
+    id          = "threshold"
+    expression  = "IF(requests*0.01 > 100, requests*0.01, 100)"
+    return_data = false
+  }
+  metric_query {
+    id          = "alarm_expr"
+    expression  = "fallbacks-threshold"
+    return_data = true
+  }
+  alarm_description  = "Fallback pricing rate spikes above threshold in 15m window."
+  treat_missing_data = "notBreaching"
+}
+
 # ---------------------------------------------------------------------------
 # IAM execution role
 # ---------------------------------------------------------------------------

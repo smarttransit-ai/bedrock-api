@@ -12,7 +12,8 @@ Environment variables (optional):
   ALLOWED_MODELS_DEFAULT  — Comma-separated default model allowlist; applied when
                             a token has no allowed_models attribute.
                             Empty string (default) = no system-level restriction.
-  PRICING_JSON            — JSON object overriding the built-in price map.
+  PRICING_JSON            — JSON object overriding the built-in price map (same
+                            normalized shape as DEFAULT_PRICING in pricing.py).
 
 Pre-flight order (cheap rejects first):
   1. parse bearer token from Authorization header         → 401
@@ -71,6 +72,13 @@ def _bedrock_region() -> str:
 def _allowed_models_default() -> list[str]:
     raw = os.environ.get("ALLOWED_MODELS_DEFAULT", "")
     return [m.strip() for m in raw.split(",") if m.strip()]
+
+
+def _resolve_pricing_mode(token_row: dict) -> str:
+    mode = token_row.get("pricing_mode", "on_demand")
+    if mode in ("on_demand", "batch"):
+        return mode
+    raise BedrockError("INTERNAL_ERROR", f"Invalid pricing_mode {mode!r}", 500)
 
 
 def handler(
@@ -140,6 +148,14 @@ def handler(
         # --- Step 9: Model allowlist ---
         check_model_allowlist(model_id, token_row, _allowed_models_default())
 
+        raw_mode = token_row.get("pricing_mode", "on_demand")
+        if raw_mode not in ("on_demand", "batch"):
+            logger.warning(
+                json.dumps({**log_ctx, "event": "pricing_mode_invalid", "pricing_mode": raw_mode})
+            )
+        pricing_mode = _resolve_pricing_mode(token_row)
+        log_ctx["pricing_mode"] = pricing_mode
+
         # --- Step 10: Forward to Bedrock ---
         max_out = (
             int(token_row["limit_max_output_tokens"])
@@ -149,22 +165,66 @@ def handler(
         body = apply_output_cap(body, route, max_out)
 
         if route == "converse":
-            bedrock_resp, in_tok, out_tok = forward_converse(_bedrock_client, model_id, body)
+            bedrock_resp, usage = forward_converse(_bedrock_client, model_id, body)
         else:
-            bedrock_resp, in_tok, out_tok = forward_invoke_model(_bedrock_client, model_id, body)
+            bedrock_resp, usage = forward_invoke_model(_bedrock_client, model_id, body)
 
-        log_ctx.update(input_tokens=in_tok, output_tokens=out_tok)
+        in_tok = usage["input_tokens"]
+        out_tok = usage["output_tokens"]
+        cache_read_tok = usage["cache_read_input_tokens"]
+        cache_write_tok = usage["cache_write_input_tokens"]
+        log_ctx.update(
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            cache_read_input_tokens=cache_read_tok,
+            cache_write_input_tokens=cache_write_tok,
+        )
 
         # --- Compute cost (integer USD-micros, no floats) ---
-        usd_micros = compute_cost(model_id, in_tok, out_tok)
+        (
+            usd_micros,
+            component_micros,
+            fallback_applied,
+            fallback_dimensions,
+            applied_rates,
+        ) = compute_cost(
+            model_id=model_id,
+            pricing_mode=pricing_mode,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            cache_read_input_tokens=cache_read_tok,
+            cache_write_input_tokens=cache_write_tok,
+        )
         log_ctx["usd_micros"] = usd_micros
+        logger.info(
+            json.dumps(
+                {
+                    **log_ctx,
+                    "event": "pricing_audit",
+                    "component_micros": component_micros,
+                    "applied_rates": applied_rates,
+                    "fallback_applied": fallback_applied,
+                    "fallback_dimensions": fallback_dimensions,
+                    "status": 200,
+                }
+            )
+        )
 
         # --- Step 11: Post-flight usage write ---
         # If this fails, log at ERROR and still return the response.
         # We accept rare under-counting over returning 5xx to a client that already
         # received a valid Bedrock response.
         try:
-            write_usage(token_id, period, in_tok, out_tok, usd_micros, usage_table)
+            write_usage(
+                token_id,
+                period,
+                in_tok,
+                out_tok,
+                cache_read_tok,
+                cache_write_tok,
+                usd_micros,
+                usage_table,
+            )
         except Exception as exc:
             logger.error(
                 json.dumps(
@@ -195,6 +255,26 @@ def handler(
 
     except (AuthError, LimitError, BedrockError) as exc:
         latency_ms = int((time.monotonic() * 1000) - start_ms)
+        logger.info(
+            json.dumps(
+                {
+                    **log_ctx,
+                    "event": "pricing_audit",
+                    "fallback_applied": False,
+                    "fallback_dimensions": [],
+                    "pricing_mode": log_ctx.get("pricing_mode", "on_demand"),
+                    "component_micros": {},
+                    "usd_micros": log_ctx.get("usd_micros"),
+                    "token_counters": {
+                        "input_tokens": log_ctx.get("input_tokens", 0),
+                        "output_tokens": log_ctx.get("output_tokens", 0),
+                        "cache_read_input_tokens": log_ctx.get("cache_read_input_tokens", 0),
+                        "cache_write_input_tokens": log_ctx.get("cache_write_input_tokens", 0),
+                    },
+                    "status": exc.status,
+                }
+            )
+        )
         logger.info(
             json.dumps(
                 {

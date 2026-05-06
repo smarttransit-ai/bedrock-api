@@ -139,6 +139,8 @@ def write_usage(
     period: str,
     in_tokens: int,
     out_tokens: int,
+    cache_read_input_tokens: int,
+    cache_write_input_tokens: int,
     usd_micros: int,
     usage_table,
 ) -> None:
@@ -149,11 +151,16 @@ def write_usage(
     """
     usage_table.update_item(
         Key={"token_id": token_id, "period": period},
-        UpdateExpression="ADD requests :r, input_tokens :i, output_tokens :o, usd_micros :u",
+        UpdateExpression=(
+            "ADD requests :r, input_tokens :i, output_tokens :o, "
+            "cache_read_input_tokens :cri, cache_write_input_tokens :cwi, usd_micros :u"
+        ),
         ExpressionAttributeValues={
             ":r": 1,
             ":i": in_tokens,
             ":o": out_tokens,
+            ":cri": cache_read_input_tokens,
+            ":cwi": cache_write_input_tokens,
             ":u": usd_micros,
         },
     )
