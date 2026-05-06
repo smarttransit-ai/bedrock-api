@@ -403,7 +403,7 @@ def main() -> None:
                 },
             }
 
-    # --- Opus 4.7: not in pricing API yet — use Opus 4 rate ($15/$75 per 1M) ---
+    # --- Opus 4.7: not in pricing API yet — manual rates ---
     for mid in [
         "anthropic.claude-opus-4-7",
         "us.anthropic.claude-opus-4-7",
@@ -411,16 +411,16 @@ def main() -> None:
     ]:
         entries[mid] = {
             "on_demand": {
-                "input_usd_micros_per_1k": 15_000,
-                "output_usd_micros_per_1k": 75_000,
-                "cache_read_input_usd_micros_per_1k": 75_000,
-                "cache_write_input_usd_micros_per_1k": 75_000,
+                "input_usd_micros_per_1k": 5_000,
+                "output_usd_micros_per_1k": 25_000,
+                "cache_read_input_usd_micros_per_1k": 500,
+                "cache_write_input_usd_micros_per_1k": 6_250,
             },
             "batch": {
-                "input_usd_micros_per_1k": 15_000,
-                "output_usd_micros_per_1k": 75_000,
-                "cache_read_input_usd_micros_per_1k": 75_000,
-                "cache_write_input_usd_micros_per_1k": 75_000,
+                "input_usd_micros_per_1k": 5_000,
+                "output_usd_micros_per_1k": 25_000,
+                "cache_read_input_usd_micros_per_1k": 500,
+                "cache_write_input_usd_micros_per_1k": 6_250,
             },
         }
 
