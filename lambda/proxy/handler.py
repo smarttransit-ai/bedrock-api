@@ -81,6 +81,56 @@ def _resolve_pricing_mode(token_row: dict) -> str:
     raise BedrockError("INTERNAL_ERROR", f"Invalid pricing_mode {mode!r}", 500)
 
 
+def _handle_usage(
+    token_id: str, token_row: dict, usage_table, log_ctx: dict, start_ms: float
+) -> dict:
+    period = datetime.now(UTC).strftime("%Y-%m")
+    item = usage_table.get_item(Key={"token_id": token_id, "period": period}).get("Item", {})
+
+    usage = {
+        "requests": int(item.get("requests", 0)),
+        "input_tokens": int(item.get("input_tokens", 0)),
+        "output_tokens": int(item.get("output_tokens", 0)),
+        "cache_read_input_tokens": int(item.get("cache_read_input_tokens", 0)),
+        "cache_write_input_tokens": int(item.get("cache_write_input_tokens", 0)),
+        "usd_micros": int(item.get("usd_micros", 0)),
+    }
+
+    def _limit(attr: str):
+        val = token_row.get(attr)
+        return int(val) if val is not None else None
+
+    limits = {
+        "monthly_requests": _limit("limit_monthly_requests"),
+        "monthly_usd_micros": _limit("limit_monthly_usd_micros"),
+        "max_input_tokens": _limit("limit_max_input_tokens"),
+        "max_output_tokens": _limit("limit_max_output_tokens"),
+        "rps": _limit("limit_rps"),
+    }
+
+    remaining = {}
+    if limits["monthly_requests"] is not None:
+        remaining["requests"] = max(0, limits["monthly_requests"] - usage["requests"])
+    if limits["monthly_usd_micros"] is not None:
+        remaining["usd_micros"] = max(0, limits["monthly_usd_micros"] - usage["usd_micros"])
+
+    body: dict = {"period": period, "usage": usage, "limits": limits}
+    if remaining:
+        body["remaining"] = remaining
+
+    latency_ms = int((time.monotonic() * 1000) - start_ms)
+    logger.info(
+        json.dumps(
+            {**log_ctx, "event": "request_complete", "status": 200, "latency_ms": latency_ms}
+        )
+    )
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(body),
+    }
+
+
 def handler(
     event: dict,
     context,
@@ -121,6 +171,11 @@ def handler(
             raise AuthError("INVALID_TOKEN", "Invalid token secret")
 
         log_ctx["owner"] = token_row.get("owner", "unknown")
+
+        # Usage self-service endpoint: read-only, skip rate-limit and quota checks.
+        http_method = event.get("requestContext", {}).get("http", {}).get("method", "")
+        if event.get("rawPath") == "/usage" and http_method == "GET":
+            return _handle_usage(token_id, token_row, usage_table, log_ctx, start_ms)
 
         # --- Step 5: Rate limit ---
         check_rate_limit(token_id, token_row, rate_limit_table)
