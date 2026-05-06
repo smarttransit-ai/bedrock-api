@@ -66,23 +66,22 @@ Example response:
     "output_tokens": 7200,
     "cache_read_input_tokens": 0,
     "cache_write_input_tokens": 0,
-    "usd_micros": 312000
+    "usd": 0.312
   },
   "limits": {
     "monthly_requests": null,
-    "monthly_usd_micros": 300000000,
+    "monthly_usd": 300.0,
     "max_input_tokens": null,
     "max_output_tokens": null,
     "rps": null
   },
   "remaining": {
-    "usd_micros": 299688000
+    "usd": 299.688
   }
 }
 ```
 
 `null` means no limit is configured. `remaining` only appears for dimensions that have a limit set.
-`usd_micros` is USD × 1 000 000 (e.g. 312000 µUSD = $0.312).
 
 ---
 
