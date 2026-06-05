@@ -424,6 +424,30 @@ def main() -> None:
             },
         }
 
+    # --- Opus 4.8: not in pricing API yet — manual rates ---
+    # Same Bedrock rates as Opus 4.7 ($5/$25, cache read $0.50/1M, 5m cache
+    # write $6.25/1M). Bedrock lists batch as N/A for Opus 4.8, so batch
+    # mirrors on_demand (no 50% discount applied).
+    for mid in [
+        "anthropic.claude-opus-4-8",
+        "us.anthropic.claude-opus-4-8",
+        "global.anthropic.claude-opus-4-8",
+    ]:
+        entries[mid] = {
+            "on_demand": {
+                "input_usd_micros_per_1k": 5_000,
+                "output_usd_micros_per_1k": 25_000,
+                "cache_read_input_usd_micros_per_1k": 500,
+                "cache_write_input_usd_micros_per_1k": 6_250,
+            },
+            "batch": {
+                "input_usd_micros_per_1k": 5_000,
+                "output_usd_micros_per_1k": 25_000,
+                "cache_read_input_usd_micros_per_1k": 500,
+                "cache_write_input_usd_micros_per_1k": 6_250,
+            },
+        }
+
     # --- Emit Python source ---
     print()
     print("# " + "=" * 75)
