@@ -113,3 +113,58 @@ def test_smoke(issued_token):
     assert resp2.status_code == 401, (
         f"Expected 401 after revoke, got {resp2.status_code}: {resp2.text}"
     )
+
+
+def test_converse_stream_smoke(issued_token):
+    """POST /model/{model_id}/converse-stream — chunks arrive + usage row incremented."""
+    token_id, bearer = issued_token
+
+    stream_url = f"{API_URL}/model/{quote(MODEL_ID, safe='')}/converse-stream"
+    headers = {"Authorization": f"Bearer {bearer}"}
+
+    with httpx.stream("POST", stream_url, json=_PAYLOAD, headers=headers, timeout=30.0) as resp:
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
+        assert resp.headers.get("content-type", "").startswith("text/event-stream"), (
+            f"Expected text/event-stream, got {resp.headers.get('content-type')}"
+        )
+        raw_chunks = list(resp.iter_text())
+
+    assert any("data:" in chunk for chunk in raw_chunks), "Expected at least one SSE data frame"
+
+    period = datetime.now(UTC).strftime("%Y-%m")
+    usage_table = boto3.resource("dynamodb", region_name=REGION).Table(f"{TABLE_PREFIX}-usage")
+    usage = usage_table.get_item(Key={"token_id": token_id, "period": period}).get("Item", {})
+    assert int(usage.get("requests", 0)) >= 1, "Expected requests >= 1 in usage table"
+    assert int(usage.get("output_tokens", 0)) > 0, "Expected output_tokens > 0 in usage table"
+
+
+def test_invoke_stream_smoke(issued_token):
+    """POST /model/{model_id}/invoke-with-response-stream — chunks arrive + usage row written."""
+    token_id, bearer = issued_token
+
+    # Anthropic native format for InvokeModel
+    invoke_payload = {
+        "messages": [{"role": "user", "content": "Say hello in one word."}],
+        "max_tokens": 20,
+        "anthropic_version": "bedrock-2023-05-31",
+    }
+
+    stream_url = f"{API_URL}/model/{quote(MODEL_ID, safe='')}/invoke-with-response-stream"
+    headers = {"Authorization": f"Bearer {bearer}"}
+
+    with httpx.stream(
+        "POST", stream_url, json=invoke_payload, headers=headers, timeout=30.0
+    ) as resp:
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
+        assert resp.headers.get("content-type", "").startswith("text/event-stream"), (
+            f"Expected text/event-stream, got {resp.headers.get('content-type')}"
+        )
+        raw_chunks = list(resp.iter_text())
+
+    assert any("data:" in chunk for chunk in raw_chunks), "Expected at least one SSE data frame"
+
+    period = datetime.now(UTC).strftime("%Y-%m")
+    usage_table = boto3.resource("dynamodb", region_name=REGION).Table(f"{TABLE_PREFIX}-usage")
+    usage = usage_table.get_item(Key={"token_id": token_id, "period": period}).get("Item", {})
+    assert int(usage.get("requests", 0)) >= 1, "Expected requests >= 1 in usage table"
+    assert int(usage.get("output_tokens", 0)) > 0, "Expected output_tokens > 0 in usage table"

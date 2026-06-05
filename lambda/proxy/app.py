@@ -41,10 +41,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from auth import AuthError, parse_bearer_token_from_request, verify_secret
-from bedrock import BedrockError, apply_output_cap, forward_converse, forward_invoke_model
+from bedrock import (
+    BedrockError,
+    _sse_json_default,
+    apply_output_cap,
+    forward_converse,
+    forward_invoke_model,
+    iter_converse_stream,
+    iter_invoke_stream,
+    open_converse_stream,
+    open_invoke_stream,
+)
 from deps import get_bedrock, get_tables
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from limits import (
     LimitError,
     check_input_cap,
@@ -527,3 +537,244 @@ async def usage_endpoint(
             json.dumps({**log_ctx, "event": "unhandled_error", "latency_ms": latency_ms})
         )
         return _error_json(500, "INTERNAL_ERROR", "Internal server error")
+
+
+# ---------------------------------------------------------------------------
+# Streaming helpers
+# ---------------------------------------------------------------------------
+
+
+def _post_flight_write(usage_out: dict, pf: PreflightResult, log_ctx: dict) -> None:
+    """Write usage + emit billing logs after a streaming response completes.
+
+    Skips the write when usage_out is empty (client disconnect before any
+    usage events were received).  Never raises — errors are logged only.
+
+    Observability parity with non-streaming routes (R5):
+      - compute_cost failure → logs ``billing_failed`` and returns early
+      - pricing_audit always emitted after a successful compute
+      - write_usage failure → logs ``usage_write_failed`` (does not suppress request_complete)
+      - request_complete always emitted when usage was written
+    """
+    # O1: guard at top before reading token vars
+    if not usage_out:
+        # No usage data at all — skip billing write (e.g. client disconnect)
+        return
+
+    in_tok = usage_out.get("input_tokens", 0)
+    out_tok = usage_out.get("output_tokens", 0)
+    cache_read_tok = usage_out.get("cache_read_input_tokens", 0)
+    cache_write_tok = usage_out.get("cache_write_input_tokens", 0)
+
+    latency_ms = int((time.monotonic() * 1000) - pf.start_ms)
+    log_ctx.update(
+        input_tokens=in_tok,
+        output_tokens=out_tok,
+        cache_read_input_tokens=cache_read_tok,
+        cache_write_input_tokens=cache_write_tok,
+    )
+
+    # (a) compute_cost in its own try/except for distinct observability
+    try:
+        (
+            usd_micros,
+            component_micros,
+            fallback_applied,
+            fallback_dimensions,
+            applied_rates,
+        ) = compute_cost(
+            model_id=pf.model_id,
+            pricing_mode=pf.pricing_mode,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            cache_read_input_tokens=cache_read_tok,
+            cache_write_input_tokens=cache_write_tok,
+        )
+    except Exception as exc:
+        logger.error(json.dumps({**log_ctx, "event": "billing_failed", "error": str(exc)}))
+        return
+
+    # (b) pricing_audit unconditional after successful compute
+    log_ctx["usd_micros"] = usd_micros
+    logger.info(
+        json.dumps(
+            {
+                **log_ctx,
+                "event": "pricing_audit",
+                "component_micros": component_micros,
+                "applied_rates": applied_rates,
+                "fallback_applied": fallback_applied,
+                "fallback_dimensions": fallback_dimensions,
+                "status": 200,
+            }
+        )
+    )
+
+    # (c) write_usage in its own try/except — failure logs usage_write_failed but
+    #     does not suppress request_complete
+    try:
+        write_usage(
+            pf.token_id,
+            pf.period,
+            in_tok,
+            out_tok,
+            cache_read_tok,
+            cache_write_tok,
+            usd_micros,
+            pf.usage_table,
+        )
+    except Exception as exc:
+        logger.error(json.dumps({**log_ctx, "event": "usage_write_failed", "error": str(exc)}))
+
+    # (d) request_complete always emitted when usage_out was populated
+    logger.info(
+        json.dumps(
+            {**log_ctx, "event": "request_complete", "status": 200, "latency_ms": latency_ms}
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Streaming helper (R6: module-level so tests can drive it directly)
+# ---------------------------------------------------------------------------
+
+
+def _sse_stream(event_iter, usage_out: dict, pf: PreflightResult, log_ctx: dict):
+    """Generate SSE frames from an event iterator; run _post_flight_write in finally.
+
+    Factored out of the route _stream() closures (R6) so test code can drive
+    the generator directly — partially iterate, call gen.close(), and assert
+    _post_flight_write behaviour without going through HTTP.
+
+    Used by both converse-stream and invoke-with-response-stream routes.  The
+    caller is responsible for building the correct event_iter (iter_converse_stream
+    or iter_invoke_stream result) before passing it here.
+
+    BB2: json.dumps uses _sse_json_default so bytes-valued Bedrock events
+    (e.g. reasoningContent.redactedContent) are base64-encoded rather than
+    crashing with TypeError and degrading the stream.
+    R4: generic except uses logger.exception so mid-stream production errors
+    carry a traceback (parity with non-streaming routes).
+    """
+    try:
+        for event in event_iter:
+            yield f"data: {json.dumps(event, default=_sse_json_default)}\n\n"
+    except BedrockError as exc:
+        yield (f"data: {json.dumps({'error': {'code': exc.code, 'message': exc.message}})}\n\n")
+    except Exception as exc:
+        logger.exception(json.dumps({**log_ctx, "event": "stream_error", "error": str(exc)}))
+        yield (
+            "data: "
+            + json.dumps({"error": {"code": "STREAM_ERROR", "message": "Stream error"}})
+            + "\n\n"
+        )
+    finally:
+        _post_flight_write(usage_out, pf, log_ctx)
+
+
+# ---------------------------------------------------------------------------
+# Streaming routes (Phase B)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/model/{model_id}/converse-stream")
+async def converse_stream(
+    model_id: str,
+    request: Request,
+    tables=Depends(get_tables),
+    bedrock_client=Depends(get_bedrock),
+):
+    """POST /model/{model_id}/converse-stream — streaming Converse API proxy."""
+    start_ms = time.monotonic() * 1000
+    log_ctx: dict = {}
+
+    try:
+        pf = await run_preflight(request, model_id, "converse", tables, bedrock_client)
+        log_ctx = pf.log_ctx
+        start_ms = pf.start_ms
+
+        # B5: Apply output cap
+        max_out = (
+            int(pf.token_row["limit_max_output_tokens"])
+            if "limit_max_output_tokens" in pf.token_row
+            else None
+        )
+        body = apply_output_cap(pf.body, "converse", max_out)
+
+        # B1: Eager stream open — SDK call BEFORE StreamingResponse so call-time
+        # errors (throttling, param validation) return real 4xx/5xx.
+        response = open_converse_stream(bedrock_client, model_id, body)
+
+    except (AuthError, LimitError, BedrockError) as exc:
+        return _handle_known_error(exc, log_ctx, start_ms)
+    except Exception:
+        latency_ms = int((time.monotonic() * 1000) - start_ms)
+        logger.exception(
+            json.dumps({**log_ctx, "event": "unhandled_error", "latency_ms": latency_ms})
+        )
+        return _error_json(500, "INTERNAL_ERROR", "Internal server error")
+
+    # SSE generator — runs after headers are sent; errors yield terminal frame
+    usage_out: dict = {}
+
+    return StreamingResponse(
+        _sse_stream(
+            iter_converse_stream(response["stream"], usage_out),
+            usage_out,
+            pf,
+            log_ctx,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/model/{model_id}/invoke-with-response-stream")
+async def invoke_with_response_stream(
+    model_id: str,
+    request: Request,
+    tables=Depends(get_tables),
+    bedrock_client=Depends(get_bedrock),
+):
+    """POST /model/{model_id}/invoke-with-response-stream — streaming InvokeModel proxy."""
+    start_ms = time.monotonic() * 1000
+    log_ctx: dict = {}
+
+    try:
+        pf = await run_preflight(request, model_id, "invoke", tables, bedrock_client)
+        log_ctx = pf.log_ctx
+        start_ms = pf.start_ms
+
+        # B5: Apply output cap
+        max_out = (
+            int(pf.token_row["limit_max_output_tokens"])
+            if "limit_max_output_tokens" in pf.token_row
+            else None
+        )
+        body = apply_output_cap(pf.body, "invoke", max_out)
+
+        # B1: Eager stream open — SDK call BEFORE StreamingResponse
+        response = open_invoke_stream(bedrock_client, model_id, body)
+
+    except (AuthError, LimitError, BedrockError) as exc:
+        return _handle_known_error(exc, log_ctx, start_ms)
+    except Exception:
+        latency_ms = int((time.monotonic() * 1000) - start_ms)
+        logger.exception(
+            json.dumps({**log_ctx, "event": "unhandled_error", "latency_ms": latency_ms})
+        )
+        return _error_json(500, "INTERNAL_ERROR", "Internal server error")
+
+    # SSE generator
+    usage_out: dict = {}
+
+    return StreamingResponse(
+        _sse_stream(
+            iter_invoke_stream(response["body"], usage_out),
+            usage_out,
+            pf,
+            log_ctx,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
