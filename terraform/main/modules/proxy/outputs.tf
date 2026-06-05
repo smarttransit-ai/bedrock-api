@@ -9,8 +9,18 @@ output "function_arn" {
 }
 
 output "invoke_arn" {
-  description = "Lambda invoke ARN (used by APIGW integration)."
+  description = "Lambda invoke ARN (used by APIGW AWS_PROXY integration)."
   value       = aws_lambda_function.proxy.invoke_arn
+}
+
+output "function_url" {
+  description = "Lambda Function URL (RESPONSE_STREAM). Use this as the API base URL."
+  value       = aws_lambda_function_url.proxy.function_url
+}
+
+output "ecr_repository_url" {
+  description = "ECR repository URL. Tag and push the proxy image here before terraform apply."
+  value       = aws_ecr_repository.proxy.repository_url
 }
 
 output "role_arn" {

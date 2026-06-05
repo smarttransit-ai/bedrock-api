@@ -29,6 +29,11 @@ def parse_bearer_token(event: dict) -> tuple[str, str]:
     return token_id, secret
 
 
+def parse_bearer_token_from_request(request) -> tuple[str, str]:
+    """Adapter for FastAPI Request → calls parse_bearer_token with a minimal event dict."""
+    return parse_bearer_token({"headers": dict(request.headers)})
+
+
 def verify_secret(secret: str, secret_hash: str) -> bool:
     """Constant-time SHA-256 verification against the stored salt:hash value.
 
