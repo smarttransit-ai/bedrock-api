@@ -1,460 +1,228 @@
 #!/usr/bin/env python3
 """Generate DEFAULT_PRICING dict for lambda/proxy/pricing.py.
 
-Fetches on-demand us-east-1 token prices from two AWS public pricing APIs:
-  - AmazonBedrock          : non-Anthropic models (per-1k-token pricing)
-  - AmazonBedrockFoundationModels : Anthropic/marketplace models (per-1M-token pricing)
-
-Cross-region inference profiles (us.*, global.*) are emitted alongside the
-base model IDs using the mapping at the bottom of this file.
+Reads Bedrock pricing data from scripts/vendor/litellm_model_prices.json
+(a filtered snapshot of litellm's community pricing data).
 
 Run from repo root:
     python3 scripts/gen_pricing.py
+
+The output (DEFAULT_PRICING block) must be manually copied into
+lambda/proxy/pricing.py, replacing the existing block between the top
+comment and the _FALLBACK_BY_MODE definition.
+
+--- Refresh procedure ---
+1. Fetch the upstream litellm JSON (URL: BerriAI/litellm raw
+   model_prices_and_context_window.json on main) into /tmp/litellm_full.json.
+   The full source URL is in scripts/vendor/litellm_model_prices.json (_meta.source).
+2. Filter to routeable Bedrock entries (both token cost fields present; no / in key after
+   stripping bedrock/), strip bedrock/ prefix from keys, keep only pricing fields, sort keys,
+   prepend _meta block:
+       jq '...' /tmp/litellm_full.json > scripts/vendor/litellm_model_prices.json
+   (see the jq command in LITELLM_PRICING_PLAN.md Step 1)
+3. Update _meta.upstream_commit and _meta.fetched_date in the vendor file.
+4. Run this script and paste the output into lambda/proxy/pricing.py.
+5. If new model IDs appear in DEFAULT_PRICING, regenerate supported_model_ids.txt
+   (see Step 0, item 8 in LITELLM_PRICING_PLAN.md).
+
+litellm is MIT licensed. See scripts/vendor/litellm_model_prices.json for attribution.
 """
 
 import json
-import urllib.request
+import pathlib
+import sys
 
-BEDROCK_API_URL = (
-    "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrock/current/index.json"
+VENDOR_JSON_PATH = pathlib.Path(__file__).parent / "vendor" / "litellm_model_prices.json"
+SNAPSHOT_PATH = pathlib.Path(__file__).parent / "vendor" / "supported_model_ids.txt"
+
+_BEDROCK_PROVIDERS = frozenset({"bedrock", "bedrock_converse"})
+
+# Prefixes derived outward (base → regional) in Pass 2a.
+_DERIVE_PREFIXES = ("us.", "global.")
+
+# All regional prefixes used to detect a region-scoped ID. Sources for derivation
+# must NOT start with any of these (a region-scoped ID is never a true base).
+# Note: us-gov.* is region-scoped and non-derivable — never prepend a prefix to it,
+# and never strip it to a "base" (there are no us-gov base IDs in the catalog).
+_REGIONAL_PREFIXES = ("us.", "global.", "eu.", "ap.", "us-gov.")
+
+# Prefix used to derive base IDs in Pass 2b (regional → base). Only us.* variants
+# are used as derivation sources for determinism (D5); us.* exists for every model
+# that needs a derived base (nova-premier, deepseek.r1, pixtral-large).
+_BASE_DERIVE_PREFIX = "us."
+
+# Provider prefixes that actually have AWS cross-region inference profiles
+# (i.e. real us./global. inference-profile IDs exist). Derived from the committed
+# snapshot supported_model_ids.txt: any provider appearing with a us./global./eu./ap.
+# regional prefix there. Constraining Pass 2a to these prevents manufacturing phantom
+# inference-profile IDs (e.g. us.ai21.*, global.cohere.*) that AWS does not expose.
+_CROSS_REGION_PROVIDERS = frozenset(
+    {"amazon", "anthropic", "deepseek", "meta", "mistral", "writer"}
 )
-FM_API_URL = (
-    "https://pricing.us-east-1.amazonaws.com"
-    "/offers/v1.0/aws/AmazonBedrockFoundationModels/current/index.json"
-)
-
-# ---------------------------------------------------------------------------
-# Model name → Bedrock API IDs
-# Each name maps to a list of (model_id, is_cross_region_profile) tuples.
-# Sourced from: aws bedrock list-foundation-models + list-inference-profiles
-# ---------------------------------------------------------------------------
-NAME_TO_IDS: dict[str, list[str]] = {
-    # Anthropic — Claude 4 Opus family
-    "Claude Opus 4 (Amazon Bedrock Edition)": [
-        "anthropic.claude-opus-4-20250514-v1:0",
-        "us.anthropic.claude-opus-4-20250514-v1:0",
-    ],
-    "Claude Opus 4.1 (Amazon Bedrock Edition)": [
-        "anthropic.claude-opus-4-1-20250805-v1:0",
-        "us.anthropic.claude-opus-4-1-20250805-v1:0",
-    ],
-    "Claude Opus 4.5 (Amazon Bedrock Edition)": [
-        "anthropic.claude-opus-4-5-20251101-v1:0",
-        "us.anthropic.claude-opus-4-5-20251101-v1:0",
-        "global.anthropic.claude-opus-4-5-20251101-v1:0",
-    ],
-    "Claude Opus 4.6 (Amazon Bedrock Edition)": [
-        "anthropic.claude-opus-4-6-v1",
-        "us.anthropic.claude-opus-4-6-v1",
-        "global.anthropic.claude-opus-4-6-v1",
-    ],
-    # Anthropic — Claude 4 Sonnet family
-    "Claude Sonnet 4 (Amazon Bedrock Edition)": [
-        "anthropic.claude-sonnet-4-20250514-v1:0",
-        "us.anthropic.claude-sonnet-4-20250514-v1:0",
-        "global.anthropic.claude-sonnet-4-20250514-v1:0",
-    ],
-    "Claude Sonnet 4.5 (Amazon Bedrock Edition)": [
-        "anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    ],
-    "Claude Sonnet 4.6 (Amazon Bedrock Edition)": [
-        "anthropic.claude-sonnet-4-6",
-        "us.anthropic.claude-sonnet-4-6",
-        "global.anthropic.claude-sonnet-4-6",
-    ],
-    # Anthropic — Claude 4 Haiku family
-    "Claude Haiku 4.5 (Amazon Bedrock Edition)": [
-        "anthropic.claude-haiku-4-5-20251001-v1:0",
-        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-    ],
-    # Anthropic — Claude 3.x family
-    "Claude 3.7 Sonnet (Amazon Bedrock Edition)": [
-        "anthropic.claude-3-7-sonnet-20250219-v1:0",
-        "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-    ],
-    "Claude 3.5 Sonnet v2 (Amazon Bedrock Edition)": [
-        "anthropic.claude-3-5-sonnet-20241022-v2:0",
-        "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
-    ],
-    "Claude 3.5 Sonnet (Amazon Bedrock Edition)": [
-        "anthropic.claude-3-5-sonnet-20240620-v1:0",
-    ],
-    "Claude 3.5 Haiku (Amazon Bedrock Edition)": [
-        "anthropic.claude-3-5-haiku-20241022-v1:0",
-        "us.anthropic.claude-3-5-haiku-20241022-v1:0",
-    ],
-    "Claude 3 Opus (Amazon Bedrock Edition)": [
-        "anthropic.claude-3-opus-20240229-v1:0",
-        "us.anthropic.claude-3-opus-20240229-v1:0",
-    ],
-    "Claude 3 Sonnet (Amazon Bedrock Edition)": [
-        "anthropic.claude-3-sonnet-20240229-v1:0",
-        "us.anthropic.claude-3-sonnet-20240229-v1:0",
-    ],
-    "Claude 3 Haiku (Amazon Bedrock Edition)": [
-        "anthropic.claude-3-haiku-20240307-v1:0",
-        "us.anthropic.claude-3-haiku-20240307-v1:0",
-    ],
-    "Claude 2.1 (Amazon Bedrock Edition)": [
-        "anthropic.claude-v2:1",
-    ],
-    "Claude 2.0 (Amazon Bedrock Edition)": [
-        "anthropic.claude-v2",
-    ],
-    "Claude Instant (Amazon Bedrock Edition)": [
-        "anthropic.claude-instant-v1",
-    ],
-    # AI21
-    "Jamba 1.5 Large (Amazon Bedrock Edition)": ["ai21.jamba-1-5-large-v1:0"],
-    "Jamba 1.5 Mini (Amazon Bedrock Edition)": ["ai21.jamba-1-5-mini-v1:0"],
-    # Cohere
-    "Cohere Command R+ (Amazon Bedrock Edition)": ["cohere.command-r-plus-v1:0"],
-    "Cohere Command R (Amazon Bedrock Edition)": ["cohere.command-r-v1:0"],
-    "Cohere Generate Model - Command (Amazon Bedrock Edition)": [
-        "cohere.command-text-v14",
-    ],
-    "Cohere Generate Model - Command-Light (Amazon Bedrock Edition)": [
-        "cohere.command-light-text-v14",
-    ],
-    # Writer / Palmyra
-    "Palmyra X4 (Amazon Bedrock Edition)": [
-        "writer.palmyra-x4-v1:0",
-        "us.writer.palmyra-x4-v1:0",
-    ],
-    "Palmyra X5 (Amazon Bedrock Edition)": [
-        "writer.palmyra-x5-v1:0",
-        "us.writer.palmyra-x5-v1:0",
-    ],
-    "Writer Palmyra Vision 7B (Amazon Bedrock Edition)": ["writer.palmyra-vision-7b"],
-}
-
-# Models in AmazonBedrock API (per-1k-token pricing, non-Anthropic)
-# name in pricing API → list of Bedrock model IDs
-BEDROCK_API_NAME_TO_IDS: dict[str, list[str]] = {
-    # Amazon Nova
-    "Nova Micro": ["amazon.nova-micro-v1:0", "us.amazon.nova-micro-v1:0"],
-    "Nova Lite": ["amazon.nova-lite-v1:0", "us.amazon.nova-lite-v1:0"],
-    "Nova Pro": ["amazon.nova-pro-v1:0", "us.amazon.nova-pro-v1:0"],
-    "Nova Premier": ["amazon.nova-premier-v1:0", "us.amazon.nova-premier-v1:0"],
-    "Nova 2.0 Lite": [
-        "amazon.nova-2-lite-v1:0",
-        "us.amazon.nova-2-lite-v1:0",
-        "global.amazon.nova-2-lite-v1:0",
-    ],
-    "Nova Pro Latency Optimized": [],  # skip — latency tier
-    # DeepSeek
-    "DeepSeek v3.2": ["deepseek.v3.2"],
-    "R1": ["deepseek.r1-v1:0", "us.deepseek.r1-v1:0"],
-    # Google
-    "Gemma 3 4B": ["google.gemma-3-4b-it"],
-    "Gemma 3 12B": ["google.gemma-3-12b-it"],
-    "Gemma 3 27B": ["google.gemma-3-27b-it"],
-    # Kimi
-    "Kimi K2 Thinking": ["moonshot.kimi-k2-thinking"],
-    "Kimi K2.5": ["moonshotai.kimi-k2.5"],
-    # Meta Llama
-    "Llama 3 8B": ["meta.llama3-8b-instruct-v1:0"],
-    "Llama 3 70B": ["meta.llama3-70b-instruct-v1:0"],
-    "Llama 3.1 8B": ["meta.llama3-1-8b-instruct-v1:0", "us.meta.llama3-1-8b-instruct-v1:0"],
-    "Llama 3.1 70B": ["meta.llama3-1-70b-instruct-v1:0", "us.meta.llama3-1-70b-instruct-v1:0"],
-    "Llama 3.1 70B Latency Optimized": [],  # skip
-    "Llama 3.2 1B": ["meta.llama3-2-1b-instruct-v1:0", "us.meta.llama3-2-1b-instruct-v1:0"],
-    "Llama 3.2 3B": ["meta.llama3-2-3b-instruct-v1:0", "us.meta.llama3-2-3b-instruct-v1:0"],
-    "Llama 3.2 11B": ["meta.llama3-2-11b-instruct-v1:0", "us.meta.llama3-2-11b-instruct-v1:0"],
-    "Llama 3.2 90B": ["meta.llama3-2-90b-instruct-v1:0", "us.meta.llama3-2-90b-instruct-v1:0"],
-    "Llama 3.3 70B": ["meta.llama3-3-70b-instruct-v1:0", "us.meta.llama3-3-70b-instruct-v1:0"],
-    "Llama 4 Scout 17B": [
-        "meta.llama4-scout-17b-instruct-v1:0",
-        "us.meta.llama4-scout-17b-instruct-v1:0",
-    ],
-    "Llama 4 Maverick 17B": [
-        "meta.llama4-maverick-17b-instruct-v1:0",
-        "us.meta.llama4-maverick-17b-instruct-v1:0",
-    ],
-    # MiniMax
-    "Minimax M2": ["minimax.minimax-m2"],
-    "Minimax M2.1": ["minimax.minimax-m2.1"],
-    "MiniMax M2.5": ["minimax.minimax-m2.5"],
-    # Mistral
-    "Mistral 7B": ["mistral.mistral-7b-instruct-v0:2"],
-    "Mixtral 8x7B": ["mistral.mixtral-8x7b-instruct-v0:1"],
-    "Mistral Small": ["mistral.mistral-small-2402-v1:0"],
-    "Mistral Large": ["mistral.mistral-large-2402-v1:0"],
-    "Mistral Large 3": ["mistral.mistral-large-3-675b-instruct"],
-    "Ministral 3B 3.0": ["mistral.ministral-3-3b-instruct"],
-    "Ministral 8B 3.0": ["mistral.ministral-3-8b-instruct"],
-    "Ministral 14B 3.0": ["mistral.ministral-3-14b-instruct"],
-    "Magistral Small 1.2": ["mistral.magistral-small-2509"],
-    "Pixtral Large 25.02": [
-        "mistral.pixtral-large-2502-v1:0",
-        "us.mistral.pixtral-large-2502-v1:0",
-    ],
-    "Devstral": ["mistral.devstral-2-123b"],
-    "Voxtral Mini 1.0": ["mistral.voxtral-mini-3b-2507"],
-    "Voxtral Small 1.0": ["mistral.voxtral-small-24b-2507"],
-    # NVIDIA
-    "NVIDIA Nemotron Nano 2": ["nvidia.nemotron-nano-9b-v2"],
-    "NVIDIA Nemotron Nano 2 VL": ["nvidia.nemotron-nano-12b-v2"],
-    "Nemotron Nano 3 30B": ["nvidia.nemotron-nano-3-30b"],
-    "NVIDIA Nemotron 3 Super 120B A12B": ["nvidia.nemotron-super-3-120b"],
-    # OpenAI OSS
-    "gpt-oss-20b": ["openai.gpt-oss-20b-1:0"],
-    "gpt-oss-120b": ["openai.gpt-oss-120b-1:0"],
-    "GPT OSS Safeguard 20B": ["openai.gpt-oss-safeguard-20b"],
-    "GPT OSS Safeguard 120B": ["openai.gpt-oss-safeguard-120b"],
-    # Qwen
-    "Qwen3 32B": ["qwen.qwen3-32b-v1:0"],
-    "Qwen3 Coder 30B A3B": ["qwen.qwen3-coder-30b-a3b-v1:0"],
-    "Qwen3 Coder Next": ["qwen.qwen3-coder-next"],
-    "Qwen3 VL 235B A22B": ["qwen.qwen3-vl-235b-a22b"],
-    # Z.AI
-    "GLM 4.7": ["zai.glm-4.7"],
-    "GLM 4.7 Flash": ["zai.glm-4.7-flash"],
-    "GLM 5": ["zai.glm-5"],
-}
 
 
-def _fetch_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=60) as resp:
-        return json.loads(resp.read())
+def _provider_of(model_id: str) -> str:
+    """Return the provider prefix of a base (non-region-scoped) model ID.
 
-
-def _build_price_map(data: dict) -> dict[str, float]:
-    """SKU → on-demand price per unit."""
-    price_map: dict[str, float] = {}
-    for sku, term_data in data["terms"]["OnDemand"].items():
-        for term in term_data.values():
-            for pd in term["priceDimensions"].values():
-                price_map[sku] = float(pd["pricePerUnit"].get("USD", 0))
-    return price_map
-
-
-def _parse_bedrock_api(data: dict) -> dict[str, dict[str, tuple[float, float]]]:
-    """AmazonBedrock API → {model_name: {mode: (input_per_1k_usd, output_per_1k_usd)}}.
-
-    Prices are in USD per 1k tokens.
-    Filter: us-east-1, on-demand Input/Output tokens only (no batch, no cache).
+    The provider is the segment before the first '.' (e.g. "amazon.nova-lite-v1:0"
+    -> "amazon"). IDs with no '.' return the whole string.
     """
-    price_map = _build_price_map(data)
-    by_model: dict[str, dict[str, dict[str, float]]] = {}
+    return model_id.split(".", 1)[0]
 
-    for sku, prod in data["products"].items():
-        attrs = prod["attributes"]
-        if attrs.get("regionCode") != "us-east-1":
+
+# IDs intentionally removed from DEFAULT_PRICING coverage.
+# Any ID in supported_model_ids.txt absent from generated entries AND absent from this set
+# causes a hard failure (sys.exit(1)). Add to this set only when removal is deliberate.
+ALLOWLISTED_REMOVALS: frozenset[str] = frozenset()
+
+
+def _per_token_to_micros_per_1k(v: float) -> int:
+    """USD per single token → integer µUSD per 1,000 tokens.
+
+    Formula: v * 1e6 (USD→µUSD) * 1e3 (per-token→per-1k) = v * 1e9.
+    Example: $15/1M = 15e-6/token → round(15e-6 * 1e9) = 15_000 µUSD/1k.
+
+    Uses Python's built-in round() which applies banker's rounding (half-even)
+    for half-integer ties. Sub-µUSD/1k ties are economically negligible.
+    """
+    return round(v * 1e9)
+
+
+def _load_vendor(path: pathlib.Path = VENDOR_JSON_PATH) -> dict:
+    """Load the vendor JSON; return the model map (excluding the _meta key)."""
+    with path.open() as f:
+        data = json.load(f)
+    return {k: v for k, v in data.items() if k != "_meta"}
+
+
+def _to_on_demand_rates(entry: dict) -> dict[str, int]:
+    """Convert a litellm pricing entry to an on_demand rates dict.
+
+    Cache fallback (D3): an absent or null cache field defaults to the output rate.
+    entry.get(key) returns None for both absent keys and JSON null values; the
+    is-not-None guard handles both identically.
+    """
+    inp = _per_token_to_micros_per_1k(entry["input_cost_per_token"])
+    out = _per_token_to_micros_per_1k(entry["output_cost_per_token"])
+    cache_read_raw = entry.get("cache_read_input_token_cost")
+    cache_write_raw = entry.get("cache_creation_input_token_cost")
+    return {
+        "input_usd_micros_per_1k": inp,
+        "output_usd_micros_per_1k": out,
+        "cache_read_input_usd_micros_per_1k": _per_token_to_micros_per_1k(cache_read_raw)
+        if cache_read_raw is not None
+        else out,
+        "cache_write_input_usd_micros_per_1k": _per_token_to_micros_per_1k(cache_write_raw)
+        if cache_write_raw is not None
+        else out,
+    }
+
+
+def _build_entries(
+    vendor: dict,
+) -> tuple[dict[str, dict[str, dict[str, int]]], list[str]]:
+    """Build the pricing entries dict from the vendor map.
+
+    Returns (entries, derived_ids) where derived_ids lists any IDs that were
+    created by derivation (not present in vendor directly).
+
+    Pass 2a derives us./global. variants from base IDs when absent, but only for
+    providers with real AWS cross-region inference profiles (_CROSS_REGION_PROVIDERS).
+    Pass 2b derives base IDs from us.* variants when absent (D5 generalization).
+    Neither pass overwrites an explicit vendor entry.
+    """
+    entries: dict[str, dict[str, dict[str, int]]] = {}
+    derived_ids: list[str] = []
+
+    # Pass 1: emit all vendor entries.
+    # The vendor file filter already enforces the constraints below; the guards
+    # here are a belt-and-suspenders double-check against schema drift.
+    for model_id, entry in vendor.items():
+        if entry.get("litellm_provider") not in _BEDROCK_PROVIDERS:
             continue
-        inf_type = attrs.get("inferenceType", "")
-        mode = "batch" if "Batch" in inf_type else "on_demand"
-        if "Input tokens" in inf_type:
-            token_class = "input"
-        elif "Output tokens" in inf_type:
-            token_class = "output"
-        else:
+        inp_cost = entry.get("input_cost_per_token")
+        out_cost = entry.get("output_cost_per_token")
+        if inp_cost is None or out_cost is None:
             continue
-        model = attrs.get("model", "")
-        usd = price_map.get(sku, 0.0)
-        by_model.setdefault(model, {}).setdefault(mode, {})
-        by_model[model][mode][token_class] = usd
-
-    output: dict[str, dict[str, tuple[float, float]]] = {}
-    for name, modes in by_model.items():
-        out_modes: dict[str, tuple[float, float]] = {}
-        for mode, vals in modes.items():
-            if "input" in vals and "output" in vals:
-                out_modes[mode] = (vals["input"], vals["output"])
-        if out_modes:
-            output[name] = out_modes
-    return output
-
-
-def _parse_fm_api(data: dict) -> dict[str, dict[str, dict[str, float]]]:
-    """AmazonBedrockFoundationModels API → nested mode/class price map (USD per 1M)."""
-    price_map = _build_price_map(data)
-    by_svc: dict[str, dict[str, dict[str, float]]] = {}
-
-    for sku, prod in data["products"].items():
-        attrs = prod["attributes"]
-        if attrs.get("regionCode") != "us-east-1":
+        # Drop entries with no billing value (both token costs 0) — e.g. rerank
+        # models at 0/0. Including them would underbill (route to fallback at $0).
+        # Token-priced embeddings (input > 0, output 0) ARE billable and kept.
+        if inp_cost <= 0 and out_cost <= 0:
             continue
-        usagetype = attrs.get("usagetype", "")
-        svc = attrs.get("servicename", "")
+        on_demand = _to_on_demand_rates(entry)
+        # D2: batch mirrors on_demand (litellm carries no Bedrock batch rates).
+        # NOTE: This over-counts batch requests for models with AWS batch discounts
+        # (e.g., Claude 3.x/4.x have a 50% batch discount). Accept this tradeoff.
+        entries[model_id] = {"on_demand": on_demand, "batch": dict(on_demand)}
 
-        skip_tokens = ("Reserved", "TPM", "Latency")
-        if any(tok in usagetype for tok in skip_tokens):
-            continue
+    # Pass 2a: for each true base ID, derive us./global. variants if absent (D5).
+    # A "base" ID is NOT region-scoped (no us./global./eu./ap./us-gov. prefix), and its
+    # provider must have real AWS cross-region inference profiles (_CROSS_REGION_PROVIDERS).
+    # This prevents manufacturing phantom IDs (e.g. us.ai21.*, global.cohere.*) and never
+    # prepends a prefix to an already-regional ID (incl. us-gov.*). dict() avoids aliasing.
+    base_ids = [
+        mid
+        for mid in list(entries)
+        if not any(mid.startswith(p) for p in _REGIONAL_PREFIXES)
+        and _provider_of(mid) in _CROSS_REGION_PROVIDERS
+    ]
+    for base_id in base_ids:
+        for prefix in _DERIVE_PREFIXES:
+            derived_id = prefix + base_id
+            if derived_id not in entries:
+                entries[derived_id] = dict(entries[base_id])
+                derived_ids.append(derived_id)
 
-        mode = "batch" if "Batch" in usagetype else "on_demand"
-        if "CacheReadInputTokenCount" in usagetype:
-            tok_type = "cache_read_input"
-        elif "CacheWriteInputTokenCount" in usagetype:
-            tok_type = "cache_write_input"
-        elif "InputTokenCount" in usagetype:
-            tok_type = "input"
-        elif "OutputTokenCount" in usagetype or "ResponseToken" in usagetype:
-            tok_type = "output"
-        else:
-            continue
+    # Pass 2b: for each us.* variant, derive the base ID if absent (D5 generalization).
+    # Fixes cases where litellm has us.X but not X (e.g. amazon.nova-premier-v1:0,
+    # deepseek.r1-v1:0, mistral.pixtral-large-2502-v1:0). Only us.* is used as the
+    # derivation source (deterministic; us.* exists for every model needing a base —
+    # avoids insertion-order nondeterminism if eu.X / ap.X ever diverge from us.X).
+    for regional_id in list(entries):
+        if regional_id.startswith(_BASE_DERIVE_PREFIX):
+            base_id = regional_id[len(_BASE_DERIVE_PREFIX) :]
+            if base_id not in entries:
+                entries[base_id] = dict(entries[regional_id])
+                derived_ids.append(base_id)
 
-        is_global = "Global" in usagetype
-        usd = price_map.get(sku, 0.0)
-
-        key = svc
-        entry = by_svc.setdefault(key, {}).setdefault(mode, {})
-        # Prefer global price (cross-region inference profile rates)
-        if tok_type not in entry or is_global:
-            entry[tok_type] = usd
-    return by_svc
-
-
-def _micros_per_1k_from_per_1k(usd_per_1k: float) -> int:
-    """USD per 1k tokens → integer µUSD per 1k tokens."""
-    return int(round(usd_per_1k * 1_000_000))
-
-
-def _micros_per_1k_from_per_1m(usd_per_1m: float) -> int:
-    """USD per 1M tokens → integer µUSD per 1k tokens."""
-    return int(round(usd_per_1m * 1_000))
+    return entries, derived_ids
 
 
 def main() -> None:
-    print("Fetching AmazonBedrock pricing API ...", flush=True)
-    bedrock_data = _fetch_json(BEDROCK_API_URL)
-    print("Fetching AmazonBedrockFoundationModels pricing API ...", flush=True)
-    fm_data = _fetch_json(FM_API_URL)
+    # Read module attrs at call time so monkeypatching VENDOR_JSON_PATH /
+    # SNAPSHOT_PATH in tests is honored (a default arg would bind at def time).
+    vendor = _load_vendor(VENDOR_JSON_PATH)
+    entries, derived_ids = _build_entries(vendor)
 
-    bedrock_prices = _parse_bedrock_api(bedrock_data)
-    fm_prices = _parse_fm_api(fm_data)
+    # D9: coverage regression gate — fail hard on removed IDs.
+    # Any ID in the snapshot absent from entries (and not allowlisted) would fall back
+    # to the Opus-tier rate at runtime (~400x over-count). Treat it as a build error.
+    if SNAPSHOT_PATH.exists():
+        snapshot_ids = set(SNAPSHOT_PATH.read_text().splitlines())
+        regressions = snapshot_ids - set(entries) - ALLOWLISTED_REMOVALS
+        if regressions:
+            print(
+                "ERROR: IDs from supported_model_ids.txt are missing from generated entries.",
+                file=sys.stderr,
+            )
+            print(
+                "They would fall back to the Opus-tier rate (~400x over-count) at runtime.",
+                file=sys.stderr,
+            )
+            print(
+                "Fix: update D5 derivation, add a manual override, or add to ALLOWLISTED_REMOVALS.",
+                file=sys.stderr,
+            )
+            for mid in sorted(regressions):
+                print(f"  MISSING: {mid}", file=sys.stderr)
+            sys.exit(1)
 
-    entries: dict[str, dict[str, dict[str, int]]] = {}
-    missing: list[str] = []
-
-    # --- Marketplace / Anthropic models (AmazonBedrockFoundationModels API) ---
-    for svc_name, model_ids in NAME_TO_IDS.items():
-        if svc_name not in fm_prices:
-            missing.append(f"FM API: {svc_name!r}")
-            continue
-        mode_map = fm_prices[svc_name]
-        on_demand = mode_map.get("on_demand", {})
-        batch = mode_map.get("batch", on_demand)
-        inp_u = _micros_per_1k_from_per_1m(on_demand.get("input", 0.0))
-        out_u = _micros_per_1k_from_per_1m(on_demand.get("output", 0.0))
-        batch_in_u = _micros_per_1k_from_per_1m(batch.get("input", on_demand.get("input", 0.0)))
-        batch_out_u = _micros_per_1k_from_per_1m(batch.get("output", on_demand.get("output", 0.0)))
-        cache_read_u = _micros_per_1k_from_per_1m(
-            on_demand.get("cache_read_input", on_demand.get("output", 0.0))
-        )
-        cache_write_u = _micros_per_1k_from_per_1m(
-            on_demand.get("cache_write_input", on_demand.get("output", 0.0))
-        )
-        batch_cache_read_u = _micros_per_1k_from_per_1m(
-            batch.get("cache_read_input", batch.get("output", on_demand.get("output", 0.0)))
-        )
-        batch_cache_write_u = _micros_per_1k_from_per_1m(
-            batch.get("cache_write_input", batch.get("output", on_demand.get("output", 0.0)))
-        )
-        for mid in model_ids:
-            entries[mid] = {
-                "on_demand": {
-                    "input_usd_micros_per_1k": inp_u,
-                    "output_usd_micros_per_1k": out_u,
-                    "cache_read_input_usd_micros_per_1k": cache_read_u,
-                    "cache_write_input_usd_micros_per_1k": cache_write_u,
-                },
-                "batch": {
-                    "input_usd_micros_per_1k": batch_in_u,
-                    "output_usd_micros_per_1k": batch_out_u,
-                    "cache_read_input_usd_micros_per_1k": batch_cache_read_u,
-                    "cache_write_input_usd_micros_per_1k": batch_cache_write_u,
-                },
-            }
-
-    # --- Standard models (AmazonBedrock API) ---
-    for api_name, model_ids in BEDROCK_API_NAME_TO_IDS.items():
-        if not model_ids:
-            continue
-        if api_name not in bedrock_prices:
-            missing.append(f"Bedrock API: {api_name!r}")
-            continue
-        mode_map = bedrock_prices[api_name]
-        on_demand = mode_map.get("on_demand")
-        if not on_demand:
-            missing.append(f"Bedrock API (on_demand): {api_name!r}")
-            continue
-        batch = mode_map.get("batch", on_demand)
-        inp_u = _micros_per_1k_from_per_1k(on_demand[0])
-        out_u = _micros_per_1k_from_per_1k(on_demand[1])
-        batch_in_u = _micros_per_1k_from_per_1k(batch[0])
-        batch_out_u = _micros_per_1k_from_per_1k(batch[1])
-        for mid in model_ids:
-            entries[mid] = {
-                "on_demand": {
-                    "input_usd_micros_per_1k": inp_u,
-                    "output_usd_micros_per_1k": out_u,
-                    "cache_read_input_usd_micros_per_1k": out_u,
-                    "cache_write_input_usd_micros_per_1k": out_u,
-                },
-                "batch": {
-                    "input_usd_micros_per_1k": batch_in_u,
-                    "output_usd_micros_per_1k": batch_out_u,
-                    "cache_read_input_usd_micros_per_1k": batch_out_u,
-                    "cache_write_input_usd_micros_per_1k": batch_out_u,
-                },
-            }
-
-    # --- Opus 4.7: not in pricing API yet — manual rates ---
-    for mid in [
-        "anthropic.claude-opus-4-7",
-        "us.anthropic.claude-opus-4-7",
-        "global.anthropic.claude-opus-4-7",
-    ]:
-        entries[mid] = {
-            "on_demand": {
-                "input_usd_micros_per_1k": 5_000,
-                "output_usd_micros_per_1k": 25_000,
-                "cache_read_input_usd_micros_per_1k": 500,
-                "cache_write_input_usd_micros_per_1k": 6_250,
-            },
-            "batch": {
-                "input_usd_micros_per_1k": 5_000,
-                "output_usd_micros_per_1k": 25_000,
-                "cache_read_input_usd_micros_per_1k": 500,
-                "cache_write_input_usd_micros_per_1k": 6_250,
-            },
-        }
-
-    # --- Opus 4.8: not in pricing API yet — manual rates ---
-    # Same Bedrock rates as Opus 4.7 ($5/$25, cache read $0.50/1M, 5m cache
-    # write $6.25/1M). Bedrock lists batch as N/A for Opus 4.8, so batch
-    # mirrors on_demand (no 50% discount applied).
-    for mid in [
-        "anthropic.claude-opus-4-8",
-        "us.anthropic.claude-opus-4-8",
-        "global.anthropic.claude-opus-4-8",
-    ]:
-        entries[mid] = {
-            "on_demand": {
-                "input_usd_micros_per_1k": 5_000,
-                "output_usd_micros_per_1k": 25_000,
-                "cache_read_input_usd_micros_per_1k": 500,
-                "cache_write_input_usd_micros_per_1k": 6_250,
-            },
-            "batch": {
-                "input_usd_micros_per_1k": 5_000,
-                "output_usd_micros_per_1k": 25_000,
-                "cache_read_input_usd_micros_per_1k": 500,
-                "cache_write_input_usd_micros_per_1k": 6_250,
-            },
-        }
-
-    # --- Emit Python source ---
-    print()
     print("# " + "=" * 75)
     print("# Generated by scripts/gen_pricing.py")
-    print("# Source: https://aws.amazon.com/bedrock/pricing/ (public pricing API)")
+    print("# Source: scripts/vendor/litellm_model_prices.json (litellm community data, MIT)")
     print("# All values: integer USD-micros (µUSD) per 1,000 tokens.")
     print("# $15.00/1M tokens = 15_000 µUSD/1k tokens.")
+    print("# Batch rates mirror on_demand (litellm carries no Bedrock batch rates).")
     print("# " + "=" * 75)
     print("DEFAULT_PRICING: dict[str, dict[str, dict[str, int]]] = {")
     for mid in sorted(entries):
@@ -462,19 +230,17 @@ def main() -> None:
         on_demand = v["on_demand"]
         inp = on_demand["input_usd_micros_per_1k"]
         out = on_demand["output_usd_micros_per_1k"]
-        inp_dollar = inp / 1000
-        out_dollar = out / 1000
-        comment = f"  # ${inp_dollar:.4g}/${out_dollar:.4g} per 1M"
+        comment = f"  # ${inp / 1000:.4g}/${out / 1000:.4g} per 1M"
         print(f'    "{mid}": {v},{comment}')
     print("}")
     print()
     print(f"# Total entries: {len(entries)}")
 
-    if missing:
+    if derived_ids:
         print()
-        print("# WARNING — not found in pricing APIs (manual price needed):")
-        for m in missing:
-            print(f"#   {m}")
+        print("# Cross-region / base IDs derived (not in vendor JSON directly):")
+        for d in sorted(derived_ids):
+            print(f"#   {d}")
 
 
 if __name__ == "__main__":
