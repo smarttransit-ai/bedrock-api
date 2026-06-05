@@ -1,16 +1,15 @@
 data "aws_region" "current" {}
 
 # ---------------------------------------------------------------------------
-# Lambda source archive
-# output_path is in this module's directory (always exists on checkout).
-# archive_file excludes accepts exact relative paths only (no glob patterns).
-# The zip is gitignored via *.zip in the root .gitignore.
+# ECR repository for the proxy container image
 # ---------------------------------------------------------------------------
-data "archive_file" "lambda" {
-  type        = "zip"
-  source_dir  = var.lambda_source_dir
-  output_path = "${path.module}/proxy.zip"
-  excludes    = [".gitkeep", "__pycache__"]
+resource "aws_ecr_repository" "proxy" {
+  name                 = "${var.name_prefix}-proxy"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -121,6 +120,59 @@ resource "aws_cloudwatch_metric_alarm" "pricing_fallback_high" {
 }
 
 # ---------------------------------------------------------------------------
+# CloudWatch alarms for Function URL guardrails (amendment R3)
+# ---------------------------------------------------------------------------
+resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
+  alarm_name          = "${var.name_prefix}-proxy-throttles"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  metric_name         = "Throttles"
+  namespace           = "AWS/Lambda"
+  period              = 60
+  statistic           = "Sum"
+  dimensions = {
+    FunctionName = aws_lambda_function.proxy.function_name
+  }
+  alarm_description  = "Lambda throttles detected — reserved concurrency may be exhausted."
+  treat_missing_data = "notBreaching"
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  alarm_name          = "${var.name_prefix}-proxy-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 60
+  statistic           = "Sum"
+  dimensions = {
+    FunctionName = aws_lambda_function.proxy.function_name
+  }
+  alarm_description  = "Lambda errors (unhandled exceptions / timeouts)."
+  treat_missing_data = "notBreaching"
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_concurrent_executions" {
+  alarm_name          = "${var.name_prefix}-proxy-concurrency-high"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  # Alert at 80% of reserved concurrency (default 50 → alarm at 40).
+  # Adjust threshold via var.lambda_reserved_concurrency if changed.
+  threshold   = floor(var.lambda_reserved_concurrency * 0.8)
+  metric_name = "ConcurrentExecutions"
+  namespace   = "AWS/Lambda"
+  period      = 60
+  statistic   = "Maximum"
+  dimensions = {
+    FunctionName = aws_lambda_function.proxy.function_name
+  }
+  alarm_description  = "Concurrent executions approaching reserved concurrency cap."
+  treat_missing_data = "notBreaching"
+}
+
+# ---------------------------------------------------------------------------
 # IAM execution role
 # ---------------------------------------------------------------------------
 resource "aws_iam_role" "lambda" {
@@ -168,7 +220,11 @@ resource "aws_iam_role_policy" "lambda" {
         # ALLOWED_MODELS_DEFAULT). IAM is intentionally permissive so that
         # tokens with no allowlist can call any Bedrock model the operator
         # account has access to. Per-token --budget caps the blast radius.
-        Action   = ["bedrock:InvokeModel"]
+        # bedrock:InvokeModelWithResponseStream is added for Phase B streaming routes.
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+        ]
         Resource = ["*"]
       },
       {
@@ -185,29 +241,33 @@ resource "aws_iam_role_policy" "lambda" {
 }
 
 # ---------------------------------------------------------------------------
-# Lambda function
+# Lambda function — container image
 # ---------------------------------------------------------------------------
 resource "aws_lambda_function" "proxy" {
-  function_name    = "${var.name_prefix}-proxy"
-  filename         = data.archive_file.lambda.output_path
-  source_code_hash = data.archive_file.lambda.output_base64sha256
-  role             = aws_iam_role.lambda.arn
-  handler          = "handler.handler"
-  runtime          = "python3.12"
-  memory_size      = var.lambda_memory_mb
-  timeout          = var.lambda_timeout_s
+  function_name = "${var.name_prefix}-proxy"
+  image_uri     = var.image_uri # passed in from terraform/main/main.tf after docker push
+  package_type  = "Image"
+  role          = aws_iam_role.lambda.arn
+  memory_size   = var.lambda_memory_mb
+  timeout       = var.lambda_timeout_s
 
   # Caps blast radius from any high-rate flood. Account default is 1000;
   # 50 is generous for lab-scale interactive use. Bump to 100 for batch jobs.
+  # NOTE: Function URLs have no built-in throttling (unlike APIGW); this is
+  # the primary global rate cap. Enforce limit_rps on all production tokens.
   reserved_concurrent_executions = var.lambda_reserved_concurrency
 
   environment {
     variables = {
-      TOKENS_TABLE           = var.tokens_table_name
-      USAGE_TABLE            = var.usage_table_name
-      RATE_LIMIT_TABLE       = var.rate_limit_table_name
-      BEDROCK_REGION         = data.aws_region.current.name
-      ALLOWED_MODELS_DEFAULT = var.allowed_models_default
+      TOKENS_TABLE                 = var.tokens_table_name
+      USAGE_TABLE                  = var.usage_table_name
+      RATE_LIMIT_TABLE             = var.rate_limit_table_name
+      BEDROCK_REGION               = data.aws_region.current.name
+      ALLOWED_MODELS_DEFAULT       = var.allowed_models_default
+      PORT                         = "8080"
+      AWS_LWA_PORT                 = "8080"
+      AWS_LWA_INVOKE_MODE          = "RESPONSE_STREAM"
+      AWS_LWA_READINESS_CHECK_PATH = "/health"
     }
   }
 
@@ -215,4 +275,13 @@ resource "aws_lambda_function" "proxy" {
     aws_iam_role_policy.lambda,
     aws_cloudwatch_log_group.lambda,
   ]
+}
+
+# ---------------------------------------------------------------------------
+# Lambda Function URL — RESPONSE_STREAM, no IAM auth (app handles bearer auth)
+# ---------------------------------------------------------------------------
+resource "aws_lambda_function_url" "proxy" {
+  function_name      = aws_lambda_function.proxy.function_name
+  authorization_type = "NONE"
+  invoke_mode        = "RESPONSE_STREAM"
 }

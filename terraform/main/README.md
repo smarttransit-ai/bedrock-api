@@ -3,8 +3,28 @@
 This is the main Terraform root module. It wires together:
 
 - **`modules/data`** — DynamoDB tables (tokens, usage, rate_limit)
-- **`modules/proxy`** — Lambda function + IAM role + CloudWatch log group
-- **`modules/api`** — API Gateway HTTP API + stage + optional custom domain
+- **`modules/proxy`** — Lambda container function + ECR repo + IAM role + CloudWatch logs/alarms + Lambda Function URL
+- **`modules/api`** — API Gateway HTTP API + stage (legacy; count-gated by `enable_http_api`, default `true`)
+
+---
+
+## Architecture
+
+```
+Clients
+  │
+  ├── Lambda Function URL  (RESPONSE_STREAM — supports streaming)
+  │      └── Lambda (container image from ECR)
+  │               ├── DynamoDB tokens table   (auth)
+  │               ├── DynamoDB usage table    (quota + billing)
+  │               ├── DynamoDB rate_limit     (per-second RPS)
+  │               └── Bedrock (InvokeModel / InvokeModelWithResponseStream)
+  │
+  └── API Gateway HTTP API  (legacy; live while enable_http_api=true)
+         └── same Lambda
+```
+
+The Lambda is served by the **AWS Lambda Web Adapter (LWA)** running uvicorn on port 8080. The Function URL is configured with `invoke_mode=RESPONSE_STREAM` so streaming responses pass through without buffering.
 
 ---
 
@@ -19,8 +39,7 @@ This is the main Terraform root module. It wires together:
 
 ### 1. Apply the bootstrap module
 
-The bootstrap module creates the S3 state bucket and DynamoDB lock table. It
-is applied once with local state, then never touched again.
+The bootstrap module creates the S3 state bucket and DynamoDB lock table. It is applied once with local state, then never touched again.
 
 ```bash
 cd terraform/bootstrap
@@ -38,8 +57,7 @@ Run the following to get a ready-to-paste backend block:
 terraform output -raw backend_block
 ```
 
-Open `terraform/main/backend.tf` and replace the `PLACEHOLDER-*` values with
-the real bucket name, region, and lock table name from the bootstrap output.
+Open `terraform/main/backend.tf` and replace the `PLACEHOLDER-*` values with the real bucket name, region, and lock table name from the bootstrap output.
 
 ### 3. Initialize the main stack
 
@@ -55,14 +73,46 @@ cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars as needed
 ```
 
-### 5. Plan and apply
+### 5. Bootstrap ECR (one-time, no image needed)
 
 ```bash
-terraform plan
-terraform apply
+terraform apply -target=module.proxy.aws_ecr_repository.proxy \
+  -var='image_uri=placeholder'
 ```
 
-The `api_url` output contains the endpoint clients should send requests to.
+### 6. Build and push the proxy image
+
+```bash
+ECR_URL=$(terraform output -raw ecr_repository_url)
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin "$ECR_URL"
+docker buildx build --platform linux/amd64 --provenance=false \
+  -t "$ECR_URL:latest" lambda/proxy/
+docker push "$ECR_URL:latest"
+```
+
+### 7. Apply
+
+```bash
+terraform apply -var="image_uri=$ECR_URL:latest"
+```
+
+The `function_url` output contains the streaming-capable Function URL. The `api_url` output points to the APIGW URL while `enable_http_api=true` (default), or to the Function URL once APIGW is retired.
+
+---
+
+## APIGW → Function URL cutover
+
+Run the sequence **once per AWS profile** (primary `roged10` and ccc `roged10_ccc`):
+
+| Step | Action |
+|---|---|
+| 1 | Apply with defaults (`enable_http_api=true`). Both APIGW and Function URL are live. No resources destroyed. |
+| 2 | Validate Function URL: `curl $(terraform output -raw function_url)/health` |
+| 3 | Update client configs to use `function_url`. APIGW remains live. |
+| 4 | Retire APIGW: `terraform apply -var="image_uri=..." -var="enable_http_api=false"` |
+
+New deployments with no existing APIGW may set `enable_http_api=false` from the start.
 
 ---
 
@@ -72,15 +122,13 @@ The `api_url` output contains the endpoint clients should send requests to.
 |---|---|---|
 | `region` | `us-east-1` | AWS region |
 | `name_prefix` | `bedrock-api` | Prefix for all resource names |
-| `default_models` | `""` | Comma-separated system-wide model allowlist passed to the Lambda as `ALLOWED_MODELS_DEFAULT`. Empty = no system-level restriction; per-token `allowed_models` still applies. IAM grants `bedrock:InvokeModel` on `*`, so the Lambda is the model gate. |
+| `image_uri` | *(required)* | ECR image URI (build and push before apply) |
+| `default_models` | `""` | Comma-separated system-wide model allowlist (`ALLOWED_MODELS_DEFAULT`). Empty = no system restriction. |
 | `log_retention_days` | `14` | CloudWatch log retention in days |
 | `lambda_memory_mb` | `512` | Lambda memory in MB |
 | `lambda_timeout_s` | `60` | Lambda timeout in seconds |
-| `lambda_reserved_concurrency` | `50` | Reserved concurrent executions cap on the proxy Lambda. Caps blast radius from any flood; account default is 1000. |
-| `throttling_rate_limit` | `20` | APIGW stage steady-state requests per second across all callers. |
-| `throttling_burst_limit` | `40` | APIGW stage burst requests per second across all callers. |
-| `domain_name` | `""` | Custom domain (leave empty to use default APIGW URL) |
-| `hosted_zone_id` | `""` | Route 53 hosted zone ID (required when `domain_name` is set) |
+| `lambda_reserved_concurrency` | `50` | Reserved concurrent executions cap. Primary global rate cap for Function URLs. |
+| `enable_http_api` | `true` | Keep the legacy APIGW HTTP API. Set `false` to retire after clients cut over to Function URL. |
 
 ---
 
@@ -88,28 +136,13 @@ The `api_url` output contains the endpoint clients should send requests to.
 
 | Name | Description |
 |---|---|
-| `api_url` | Public API endpoint URL |
+| `api_url` | APIGW URL when `enable_http_api=true`; Function URL when `false` |
+| `function_url` | Lambda Function URL (always exposed — use this to validate streaming) |
+| `ecr_repository_url` | ECR repository URL |
 | `lambda_function_name` | Proxy Lambda function name |
 | `tokens_table` | DynamoDB tokens table name |
 | `usage_table` | DynamoDB usage table name |
 | `rate_limit_table` | DynamoDB rate_limit table name |
-
----
-
-## Custom domain
-
-Set `domain_name` and `hosted_zone_id` in `terraform.tfvars`:
-
-```hcl
-domain_name    = "api.example.com"
-hosted_zone_id = "Z1234567890ABC"
-```
-
-Terraform will:
-1. Create a regional ACM certificate in the same region as the API.
-2. Add the DNS validation CNAME to the Route 53 hosted zone.
-3. Wait for certificate validation.
-4. Create an APIGW custom domain name and Route 53 A record.
 
 ---
 
@@ -122,37 +155,19 @@ The proxy Lambda's execution role is least-privilege:
 | `tokens` table | `dynamodb:GetItem` |
 | `usage` table | `dynamodb:GetItem`, `dynamodb:UpdateItem` |
 | `rate_limit` table | `dynamodb:UpdateItem` |
-| Bedrock | `bedrock:InvokeModel` on `*` |
+| Bedrock | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` on `*` |
 | Lambda log group | `logs:CreateLogStream`, `logs:PutLogEvents` |
 
-Bedrock IAM is intentionally permissive (`Resource = ["*"]`). The model
-allowlist is enforced inside the Lambda — first by the per-token
-`allowed_models` attribute, then by the optional system-wide
-`ALLOWED_MODELS_DEFAULT` env var (`var.default_models`). Per-token
-`--budget` caps the cost blast radius of any leaked token.
+Bedrock IAM is intentionally permissive (`Resource = ["*"]`). The model allowlist is enforced inside the Lambda — first by per-token `allowed_models`, then by the optional system-wide `ALLOWED_MODELS_DEFAULT` env var. Per-token `--budget` caps the cost blast radius of any leaked token.
 
 ---
 
 ## Anonymous-attack-surface controls
 
-The deployment is hardened against unauthenticated probing/scanning:
+- **Function URL auth.** The Function URL uses `authorization_type = "NONE"` — the Lambda handles bearer-token auth. All unauthenticated requests still pass through Lambda but are rejected at step 1 (parse token) before any DynamoDB read.
+- **Reserved Lambda concurrency.** Caps parallel executions at `var.lambda_reserved_concurrency` (default 50). Bounds Lambda spend under any flood.
+- **APIGW route narrowing (legacy).** While APIGW is live, only `POST /model/*` and `GET /usage` reach Lambda. All other paths return 404 at APIGW with no Lambda invocation.
+- **APIGW stage throttling (legacy).** Steady-state 20 rps / 40 burst across all callers.
+- **TLS-only.** Both Function URL and APIGW enforce TLS.
 
-- **Route narrowing.** APIGW only accepts `POST /model/{proxy+}`. Every
-  other path or method (`GET /`, `GET /.env`, `OPTIONS /healthcheck`,
-  `DELETE *`, etc.) returns 404 directly from API Gateway — no Lambda
-  invocation, no DynamoDB read, no log entry, no cost. To add a new route
-  later (e.g. a `/healthz`), add a second `aws_apigatewayv2_route`.
-- **Stage throttling.** APIGW caps total requests at
-  `var.throttling_rate_limit` rps with `var.throttling_burst_limit` burst,
-  applied across all callers. Requests over the cap are rejected at APIGW
-  with HTTP 429 and never reach Lambda. Default 20/40 — sized for lab-scale
-  interactive traffic; raise if batch jobs need it.
-- **Reserved Lambda concurrency.** The proxy Lambda is capped at
-  `var.lambda_reserved_concurrency` parallel executions (default 50). Even
-  if a flood gets past the throttle (e.g. burst), Lambda spend is bounded.
-- **TLS-only.** API Gateway HTTP API doesn't accept plain HTTP at all —
-  port 80 is closed at the edge.
-
-For per-IP rate limiting or geo restrictions, attach an AWS WAF web ACL to
-the API stage. Not in this stack — adds cost (~$5/mo + per-request
-charges) and most labs don't need it.
+For per-IP rate limiting or geo restrictions, attach an AWS WAF web ACL to the APIGW stage or Function URL. Not in this stack.

@@ -3,9 +3,15 @@ variable "name_prefix" {
   type        = string
 }
 
-variable "lambda_source_dir" {
-  description = "Absolute path to the lambda/proxy/ source directory."
+variable "image_uri" {
+  description = "ECR image URI (repository:tag or digest) for the proxy Lambda container. Build and push before running terraform apply."
   type        = string
+  default     = ""
+
+  validation {
+    condition     = var.image_uri != ""
+    error_message = "image_uri must be set to a valid ECR image URI before applying. Use -target=module.proxy.aws_ecr_repository.proxy with image_uri=placeholder for the initial ECR bootstrap."
+  }
 }
 
 variable "lambda_memory_mb" {
@@ -21,7 +27,7 @@ variable "lambda_timeout_s" {
 }
 
 variable "lambda_reserved_concurrency" {
-  description = "Reserved concurrent executions cap for the proxy Lambda. Caps blast radius from a flood; account default is 1000."
+  description = "Reserved concurrent executions cap for the proxy Lambda. Caps blast radius from a flood; account default is 1000. Function URLs have no built-in throttling — this is the primary global rate cap."
   type        = number
   default     = 50
 }
