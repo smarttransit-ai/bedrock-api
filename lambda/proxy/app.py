@@ -69,6 +69,7 @@ from limits import (
 )
 from pricing import compute_cost, invalidate_cache
 from pricing_refresh import refresh_pricing
+from pricing_store import load_live_meta
 
 # Ensure INFO-level logs emit under uvicorn / Lambda Web Adapter (which does
 # not configure the root logger; without this, the root logger stays WARNING
@@ -527,6 +528,33 @@ async def admin_pricing_refresh(
         )
     )
     return JSONResponse(summary)
+
+
+@app.get("/admin/pricing")
+async def admin_pricing_status(
+    request: Request,
+    tables=Depends(get_tables),
+    s3=Depends(get_s3),
+):
+    """GET /admin/pricing — provenance of the currently-live pricing (admin only).
+
+    Returns the live catalog's meta (fetched_at, source, entry_count) when an S3
+    object exists, or `source: "default"` when none does (the baked-in
+    DEFAULT_PRICING is in use). Does not mutate anything.
+    """
+    tokens_table, _, _ = tables
+    try:
+        require_admin(request, tokens_table)
+    except AuthError as exc:
+        return _error_json(exc.status, exc.code, exc.message)
+    try:
+        meta = load_live_meta(s3)
+    except Exception as exc:
+        logger.exception(json.dumps({"event": "pricing_read_failed", "error": str(exc)}))
+        return _error_json(502, "PRICING_READ_FAILED", "could not read live pricing")
+    if meta is None:
+        return JSONResponse({"source": "default", "meta": None})
+    return JSONResponse({"source": "live", "meta": meta})
 
 
 # ---------------------------------------------------------------------------

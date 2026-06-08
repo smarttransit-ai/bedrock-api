@@ -93,6 +93,7 @@ cached across warm Lambda invocations.
 | `INVALID_TOKEN` | 401 | Token not found, revoked, or bad secret |
 | `FORBIDDEN` | 403 | Valid token lacks admin rights (admin-only routes) |
 | `REFRESH_FAILED` | 502 | `POST /admin/pricing/refresh` could not fetch/validate the catalog |
+| `PRICING_READ_FAILED` | 502 | `GET /admin/pricing` could not read the live catalog object |
 | `RATE_LIMIT_EXCEEDED` | 429 | Per-second request rate exceeded |
 | `MONTHLY_REQUEST_QUOTA_EXCEEDED` | 429 | Monthly request count exhausted |
 | `MONTHLY_BUDGET_EXCEEDED` | 429 | Monthly USD budget exhausted |
@@ -125,6 +126,11 @@ required anchor models present with sane, in-band rates), then writes S3 — all
 nothing, so a bad pull never zeroes billing. Other instances pick up the new catalog
 within one TTL. An admin token is one whose row has `admin == True` (CLI:
 `bedrock-api issue --admin`).
+
+`GET /admin/pricing` (admin only) returns the live catalog's provenance —
+`{"source": "live", "meta": {fetched_at, source, entry_count}}` when an object
+exists, or `{"source": "default", "meta": null}` when the baked-in catalog is in
+use. Read-only.
 
 Default-model rates live in `DEFAULT_PRICING` (sourced from litellm via
 `scripts/gen_pricing.py`); unknown models fall back to Opus-tier conservative rates.
@@ -161,7 +167,7 @@ All log lines are JSON to CloudWatch Logs. Fields:
 
 | Field | Notes |
 |---|---|
-| `event` | `request_complete`, `request_rejected`, `usage_write_failed`, `billing_failed`, `stream_error`, `pricing_refresh`, `pricing_refresh_failed`, `pricing_source_unavailable` |
+| `event` | `request_complete`, `request_rejected`, `usage_write_failed`, `billing_failed`, `stream_error`, `pricing_refresh`, `pricing_refresh_failed`, `pricing_read_failed`, `pricing_source_unavailable` |
 | `token_id` | The `bk_<32hex>` prefix only — never the secret |
 | `owner` | Human label from the token row |
 | `model_id` | Bedrock model/profile ID |

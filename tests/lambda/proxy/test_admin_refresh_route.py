@@ -96,3 +96,36 @@ def test_admin_fetch_failure_502_pricing_unchanged(admin_client, monkeypatch):
     assert resp.status_code == 502
     assert resp.json()["error"]["code"] == "REFRESH_FAILED"
     assert load_live_catalog(boto3.client("s3", region_name="us-east-1")) is None
+
+
+# --- GET /admin/pricing (status) ---
+
+
+def test_status_no_token_401(admin_client):
+    client, _, _ = admin_client
+    assert client.get("/admin/pricing").status_code == 401
+
+
+def test_status_non_admin_403(admin_client):
+    client, _, nbearer = admin_client
+    resp = client.get("/admin/pricing", headers={"Authorization": f"Bearer {nbearer}"})
+    assert resp.status_code == 403
+
+
+def test_status_absent_reports_default(admin_client):
+    client, abearer, _ = admin_client
+    resp = client.get("/admin/pricing", headers={"Authorization": f"Bearer {abearer}"})
+    assert resp.status_code == 200
+    assert resp.json() == {"source": "default", "meta": None}
+
+
+def test_status_after_refresh_reports_live(admin_client, monkeypatch):
+    client, abearer, _ = admin_client
+    monkeypatch.setattr(pricing_refresh, "fetch_litellm", lambda: _raw_scaled(1.0))
+    client.post("/admin/pricing/refresh", headers={"Authorization": f"Bearer {abearer}"})
+    resp = client.get("/admin/pricing", headers={"Authorization": f"Bearer {abearer}"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "live"
+    assert body["meta"]["entry_count"] > 0
+    assert "fetched_at" in body["meta"]

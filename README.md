@@ -306,6 +306,14 @@ On success (HTTP 200) it returns a summary and the new catalog is live within on
 }
 ```
 
+**Check what's live** at any time (read-only):
+
+```bash
+curl -sS "$API_URL/admin/pricing" -H "Authorization: Bearer $(cat admin-token.txt)" | jq .
+# {"source":"live","meta":{"fetched_at":"…","source":"…","entry_count":291}}
+# or {"source":"default","meta":null}  ← no refresh yet; baked-in rates in use
+```
+
 It is **all-or-nothing and validated** — the refresh writes S3 only if the rebuilt
 catalog passes the gate (non-empty; not >20% smaller than the baked-in catalog;
 the in-use anchor models present with sane, in-band rates). If the pull fails or

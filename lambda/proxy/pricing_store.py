@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 PRICING_OBJECT_KEY = os.environ.get("PRICING_OBJECT_KEY", "pricing/current.json")
 
 
-def load_live_catalog(s3) -> dict | None:
-    """Return the live catalog dict, or None if the object is authoritatively absent.
+def _load_object(s3) -> dict | None:
+    """Return the parsed live object ``{catalog, meta}``, or None if authoritatively absent.
 
     Returns None only for an authoritative "no object" (NoSuchKey/NoSuchBucket).
     RAISES on any transient/unreachable/corrupt condition (other ClientError,
-    timeout, unparseable body, missing ``catalog`` key) so the caller can apply a
-    short retry cadence — a corrupt object is treated like a transient fault (fall
-    back to baked-in rates and re-check soon, rather than permanently masking it).
+    timeout, unparseable body) so the caller can apply a short retry cadence — a
+    corrupt object is treated like a transient fault (fall back to baked-in rates
+    and re-check soon, rather than permanently masking it).
     """
     from botocore.exceptions import ClientError
 
@@ -36,8 +36,19 @@ def load_live_catalog(s3) -> dict | None:
         if code in ("NoSuchKey", "NoSuchBucket", "404"):
             return None
         raise
-    data = json.loads(resp["Body"].read())
-    return data["catalog"]
+    return json.loads(resp["Body"].read())
+
+
+def load_live_catalog(s3) -> dict | None:
+    """Return the live catalog dict, or None if authoritatively absent (raises on corrupt)."""
+    obj = _load_object(s3)
+    return obj["catalog"] if obj is not None else None
+
+
+def load_live_meta(s3) -> dict | None:
+    """Return the live catalog's meta dict, or None if no live object exists."""
+    obj = _load_object(s3)
+    return obj.get("meta") if obj is not None else None
 
 
 def save_live_catalog(s3, catalog: dict, meta: dict) -> None:
