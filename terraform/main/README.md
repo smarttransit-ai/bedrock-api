@@ -3,8 +3,7 @@
 This is the main Terraform root module. It wires together:
 
 - **`modules/data`** — DynamoDB tables (tokens, usage, rate_limit)
-- **`modules/proxy`** — Lambda container function + ECR repo + IAM role + CloudWatch logs/alarms + Lambda Function URL
-- **`modules/api`** — API Gateway HTTP API + stage (legacy; count-gated by `enable_http_api`, default `true`)
+- **`modules/proxy`** — Lambda container function + ECR repo + IAM role + CloudWatch logs/alarms + API Gateway REST API (REGIONAL, streaming)
 
 ---
 
@@ -13,18 +12,22 @@ This is the main Terraform root module. It wires together:
 ```
 Clients
   │
-  ├── Lambda Function URL  (RESPONSE_STREAM — supports streaming)
-  │      └── Lambda (container image from ECR)
-  │               ├── DynamoDB tokens table   (auth)
-  │               ├── DynamoDB usage table    (quota + billing)
-  │               ├── DynamoDB rate_limit     (per-second RPS)
-  │               └── Bedrock (InvokeModel / InvokeModelWithResponseStream)
-  │
-  └── API Gateway HTTP API  (legacy; live while enable_http_api=true)
-         └── same Lambda
+  └── API Gateway REST API (REGIONAL)
+         └── Lambda alias "live"  (provisioned concurrency = 1)
+                  └── Lambda (container image from ECR)
+                           ├── DynamoDB tokens table   (auth)
+                           ├── DynamoDB usage table    (quota + billing)
+                           ├── DynamoDB rate_limit     (per-second RPS)
+                           └── Bedrock (InvokeModel / InvokeModelWithResponseStream)
 ```
 
-The Lambda is served by the **AWS Lambda Web Adapter (LWA)** running uvicorn on port 8080. The Function URL is configured with `invoke_mode=RESPONSE_STREAM` so streaming responses pass through without buffering.
+The Lambda is served by the **AWS Lambda Web Adapter (LWA)** running uvicorn on port 8080. LWA is configured with `AWS_LWA_INVOKE_MODE=RESPONSE_STREAM`.
+
+The REST API uses a REGIONAL endpoint (5-minute idle timeout — required for streaming) with:
+- `response_transfer_mode = "STREAM"` on the integration
+- `timeout_milliseconds = 900000` (15 minutes — covers longest streaming calls)
+- Lambda alias "live" with `provisioned_concurrent_executions = 1` to eliminate cold-start 500s
+- Stage throttle: 20 rps steady / 40 burst
 
 ---
 
@@ -63,7 +66,7 @@ Open `terraform/main/backend.tf` and replace the `PLACEHOLDER-*` values with the
 
 ```bash
 cd terraform/main
-terraform init
+AWS_PROFILE=roged10 AWS_REGION=us-east-1 terraform init
 ```
 
 ### 4. Configure variables
@@ -76,14 +79,15 @@ cp terraform.tfvars.example terraform.tfvars
 ### 5. Bootstrap ECR (one-time, no image needed)
 
 ```bash
-terraform apply -target=module.proxy.aws_ecr_repository.proxy \
-  -var='image_uri=placeholder'
+AWS_PROFILE=roged10 AWS_REGION=us-east-1 \
+  terraform apply -target=module.proxy.aws_ecr_repository.proxy \
+    -var='image_uri=placeholder'
 ```
 
 ### 6. Build and push the proxy image
 
 ```bash
-ECR_URL=$(terraform output -raw ecr_repository_url)
+ECR_URL=$(AWS_PROFILE=roged10 AWS_REGION=us-east-1 terraform output -raw ecr_repository_url)
 aws ecr get-login-password --region us-east-1 | \
   docker login --username AWS --password-stdin "$ECR_URL"
 docker buildx build --platform linux/amd64 --provenance=false \
@@ -94,25 +98,40 @@ docker push "$ECR_URL:latest"
 ### 7. Apply
 
 ```bash
-terraform apply -var="image_uri=$ECR_URL:latest"
+AWS_PROFILE=roged10 AWS_REGION=us-east-1 \
+  terraform apply -var="image_uri=$ECR_URL:latest"
 ```
 
-The `function_url` output contains the streaming-capable Function URL. The `api_url` output points to the APIGW URL while `enable_http_api=true` (default), or to the Function URL once APIGW is retired.
+The `api_url` output contains the REST API invoke URL (REGIONAL endpoint, stage `v1`).
+
+Run for both deployments:
+- Primary: `AWS_PROFILE=roged10` → account 343084147688
+- CCC: `AWS_PROFILE=roged10_ccc` → account 066949051849
 
 ---
 
-## APIGW → Function URL cutover
+## State migration (for already-applied deployments)
 
-Run the sequence **once per AWS profile** (primary `roged10` and ccc `roged10_ccc`):
+When migrating from the old Lambda Function URL + HTTP API v2 architecture, destroy the old resources explicitly before running the full apply (the `destroy -target` approach actually removes AWS resources, unlike `state rm` which only orphans them):
 
-| Step | Action |
-|---|---|
-| 1 | Apply with defaults (`enable_http_api=true`). Both APIGW and Function URL are live. No resources destroyed. |
-| 2 | Validate Function URL: `curl $(terraform output -raw function_url)/health` |
-| 3 | Update client configs to use `function_url`. APIGW remains live. |
-| 4 | Retire APIGW: `terraform apply -var="image_uri=..." -var="enable_http_api=false"` |
+```bash
+# Destroy old Function URL
+terraform destroy -target='module.proxy.aws_lambda_function_url.proxy' \
+  -var="image_uri=$ECR_URL:latest"
 
-New deployments with no existing APIGW may set `enable_http_api=false` from the start.
+# Destroy old HTTP API (cascades to routes, integrations, stage)
+terraform destroy -target='module.api[0].aws_apigatewayv2_api.main' \
+  -var="image_uri=$ECR_URL:latest"
+
+# Destroy remaining resources if still in state
+terraform destroy -target='module.api[0].aws_cloudwatch_log_group.api_access' \
+  -var="image_uri=$ECR_URL:latest"
+terraform destroy -target='module.api[0].aws_lambda_permission.apigw' \
+  -var="image_uri=$ECR_URL:latest"
+
+# Then apply the full new config
+terraform apply -var="image_uri=$ECR_URL:latest"
+```
 
 ---
 
@@ -127,8 +146,16 @@ New deployments with no existing APIGW may set `enable_http_api=false` from the 
 | `log_retention_days` | `14` | CloudWatch log retention in days |
 | `lambda_memory_mb` | `512` | Lambda memory in MB |
 | `lambda_timeout_s` | `60` | Lambda timeout in seconds |
-| `lambda_reserved_concurrency` | `50` | Reserved concurrent executions cap. Primary global rate cap for Function URLs. |
-| `enable_http_api` | `true` | Keep the legacy APIGW HTTP API. Set `false` to retire after clients cut over to Function URL. |
+| `lambda_reserved_concurrency` | `50` | Reserved concurrent executions cap |
+
+### Proxy module variables
+
+| Name | Default | Description |
+|---|---|---|
+| `provisioned_concurrency` | `1` | Provisioned concurrent executions on alias "live". Set to 0 to disable (not recommended). |
+| `throttling_rate_limit` | `20` | Stage-level steady-state rps |
+| `throttling_burst_limit` | `40` | Stage-level burst rps |
+| `apigw_cloudwatch_role_already_set` | `false` | Skip creating account-level CloudWatch role if already configured |
 
 ---
 
@@ -136,8 +163,7 @@ New deployments with no existing APIGW may set `enable_http_api=false` from the 
 
 | Name | Description |
 |---|---|
-| `api_url` | APIGW URL when `enable_http_api=true`; Function URL when `false` |
-| `function_url` | Lambda Function URL (always exposed — use this to validate streaming) |
+| `api_url` | REST API invoke URL (REGIONAL, stage v1) |
 | `ecr_repository_url` | ECR repository URL |
 | `lambda_function_name` | Proxy Lambda function name |
 | `tokens_table` | DynamoDB tokens table name |
@@ -162,12 +188,12 @@ Bedrock IAM is intentionally permissive (`Resource = ["*"]`). The model allowlis
 
 ---
 
-## Anonymous-attack-surface controls
+## Security controls
 
-- **Function URL auth.** The Function URL uses `authorization_type = "NONE"` — the Lambda handles bearer-token auth. All unauthenticated requests still pass through Lambda but are rejected at step 1 (parse token) before any DynamoDB read.
+- **Bearer-token auth.** The app handles authentication — all unauthenticated requests are rejected before any DynamoDB read.
 - **Reserved Lambda concurrency.** Caps parallel executions at `var.lambda_reserved_concurrency` (default 50). Bounds Lambda spend under any flood.
-- **APIGW route narrowing (legacy).** While APIGW is live, only `POST /model/*` and `GET /usage` reach Lambda. All other paths return 404 at APIGW with no Lambda invocation.
-- **APIGW stage throttling (legacy).** Steady-state 20 rps / 40 burst across all callers.
-- **TLS-only.** Both Function URL and APIGW enforce TLS.
+- **REST API route narrowing.** `ANY /{proxy+}` and `ANY /` routes forward all paths to Lambda. Unrecognized paths return 404 from the FastAPI app.
+- **REST API stage throttling.** Steady-state 20 rps / 40 burst across all callers.
+- **TLS-only.** REGIONAL REST API enforces TLS.
 
-For per-IP rate limiting or geo restrictions, attach an AWS WAF web ACL to the APIGW stage or Function URL. Not in this stack.
+For per-IP rate limiting or geo restrictions, attach an AWS WAF web ACL to the REST API stage.

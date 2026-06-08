@@ -21,15 +21,21 @@ variable "lambda_memory_mb" {
 }
 
 variable "lambda_timeout_s" {
-  description = "Lambda function timeout in seconds."
+  description = "Lambda function timeout in seconds. Set to match the API Gateway integration timeout (900s) so Lambda does not terminate streaming responses before the gateway gives up."
   type        = number
-  default     = 60
+  default     = 900
 }
 
 variable "lambda_reserved_concurrency" {
-  description = "Reserved concurrent executions cap for the proxy Lambda. Caps blast radius from a flood; account default is 1000. Function URLs have no built-in throttling — this is the primary global rate cap."
+  description = "Reserved concurrent executions cap for the proxy Lambda. Caps blast radius from a flood; account default is 1000."
   type        = number
   default     = 50
+}
+
+variable "provisioned_concurrency" {
+  description = "Provisioned concurrent executions on the 'live' alias. Eliminates cold-start 500s. Set to 0 to disable (not recommended for production)."
+  type        = number
+  default     = 1
 }
 
 variable "log_retention_days" {
@@ -42,6 +48,24 @@ variable "allowed_models_default" {
   description = "Comma-separated default model allowlist passed to Lambda as ALLOWED_MODELS_DEFAULT. Empty string = no system-level restriction."
   type        = string
   default     = ""
+}
+
+variable "throttling_rate_limit" {
+  description = "Stage-level default steady-state requests per second. Sized for lab-scale interactive traffic; raise for batch jobs."
+  type        = number
+  default     = 20
+}
+
+variable "throttling_burst_limit" {
+  description = "Stage-level default maximum requests per second (burst)."
+  type        = number
+  default     = 40
+}
+
+variable "apigw_cloudwatch_role_already_set" {
+  description = "Set true if the account already has a CloudWatch role configured for API Gateway (aws_api_gateway_account is account-level and conflicts if set twice). When true, skips creating the IAM role and aws_api_gateway_account resources."
+  type        = bool
+  default     = false
 }
 
 variable "tokens_table_name" {
