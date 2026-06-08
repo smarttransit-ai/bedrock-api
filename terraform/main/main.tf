@@ -35,24 +35,24 @@
 #   - Alias "live" with provisioned_concurrency=1 eliminates cold-start 500s
 #   - Stage "v1" with 20 rps / 40 burst throttle
 #
-# State migration from the old Function URL + HTTP API v2 (already-applied deployments):
-#   Terraform `removed` blocks cannot address count-indexed module instances (module.api[0])
-#   in the current Terraform version. Destroy the old resources explicitly before applying:
+# State separation (REQUIRED before the first ccc apply):
+#   Each deployment MUST use its own backend state. backend.tf carries no bucket/key
+#   (partial config); select the target at init time:
+#     terraform init -reconfigure -backend-config=primary.s3.tfbackend   # roged10
+#     terraform init -reconfigure -backend-config=ccc.s3.tfbackend       # roged10_ccc
+#   The ccc state bucket must be bootstrapped in the ccc account first (see
+#   terraform/bootstrap). Switching only AWS_PROFILE does NOT switch state.
 #
-#   terraform destroy -target='module.proxy.aws_lambda_function_url.proxy' \
-#     -var="image_uri=$ECR_URL:latest"
-#   terraform destroy -target='module.api[0].aws_apigatewayv2_api.main' \
-#     -var="image_uri=$ECR_URL:latest"
-#   # The apigatewayv2_api destroy cascades to routes, integrations, and the stage.
-#   # If the CW log group persists:
-#   terraform destroy -target='module.api[0].aws_cloudwatch_log_group.api_access' \
-#     -var="image_uri=$ECR_URL:latest"
-#   # Lambda permission for old APIGW (if still in state):
-#   terraform destroy -target='module.api[0].aws_lambda_permission.apigw' \
-#     -var="image_uri=$ECR_URL:latest"
-#
-#   Then run the full apply:
-#   terraform apply -var="image_uri=$ECR_URL:latest"
+# Migration from the old HTTP API v2 deployment (applies to ccc, still on the
+# pre-streaming architecture):
+#   Removing the `module "api"` block (done) makes a normal apply plan the
+#   destruction of the old HTTP API v2 resources (apigatewayv2 api/routes/
+#   integration/stage, its access-log group, and the old lambda permission) as
+#   orphans — no `-target` surgery or `removed` blocks needed. The proxy Lambda
+#   also changes from a ZIP package to a container image, so it is replaced.
+#   ALWAYS review the plan before applying:
+#     terraform plan  -var="image_uri=$ECR_URL:latest"
+#     terraform apply -var="image_uri=$ECR_URL:latest"
 #
 # =============================================================================
 
@@ -64,13 +64,17 @@ module "data" {
 module "proxy" {
   source = "./modules/proxy"
 
-  name_prefix                 = var.name_prefix
-  image_uri                   = var.image_uri
-  lambda_memory_mb            = var.lambda_memory_mb
-  lambda_timeout_s            = var.lambda_timeout_s
-  lambda_reserved_concurrency = var.lambda_reserved_concurrency
-  log_retention_days          = var.log_retention_days
-  allowed_models_default      = var.default_models
+  name_prefix                       = var.name_prefix
+  image_uri                         = var.image_uri
+  lambda_memory_mb                  = var.lambda_memory_mb
+  lambda_timeout_s                  = var.lambda_timeout_s
+  lambda_reserved_concurrency       = var.lambda_reserved_concurrency
+  provisioned_concurrency           = var.provisioned_concurrency
+  throttling_rate_limit             = var.throttling_rate_limit
+  throttling_burst_limit            = var.throttling_burst_limit
+  apigw_cloudwatch_role_already_set = var.apigw_cloudwatch_role_already_set
+  log_retention_days                = var.log_retention_days
+  allowed_models_default            = var.default_models
 
   tokens_table_name     = module.data.tokens_table_name
   tokens_table_arn      = module.data.tokens_table_arn

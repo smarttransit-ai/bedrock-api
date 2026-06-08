@@ -44,3 +44,27 @@ variable "lambda_reserved_concurrency" {
   type        = number
   default     = 50
 }
+
+variable "provisioned_concurrency" {
+  description = "Provisioned concurrent executions on the 'live' alias. Eliminates cold-start 500s. Set to 0 to disable (not recommended for production)."
+  type        = number
+  default     = 1
+}
+
+variable "throttling_rate_limit" {
+  description = "API Gateway stage steady-state requests per second. Sized for lab-scale interactive traffic; raise for batch jobs."
+  type        = number
+  default     = 20
+}
+
+variable "throttling_burst_limit" {
+  description = "API Gateway stage maximum requests per second (burst)."
+  type        = number
+  default     = 40
+}
+
+variable "apigw_cloudwatch_role_already_set" {
+  description = "Set true if the account already has a CloudWatch role configured for API Gateway. aws_api_gateway_account is an account-global singleton; setting it twice across stacks conflicts. When true, skips creating the IAM role and aws_api_gateway_account resources (the account must already have a CW role, or stage access logging will fail). Check with: aws apigateway get-account."
+  type        = bool
+  default     = false
+}

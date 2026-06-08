@@ -1,0 +1,5 @@
+# Backend state for the PRIMARY deployment (account 343084147688, profile roged10).
+# Use with: terraform init -reconfigure -backend-config=primary.s3.tfbackend
+bucket         = "bedrock-api-tfstate-22178a0f"
+key            = "bedrock-api/terraform.tfstate"
+dynamodb_table = "bedrock-api-tfstate-lock"

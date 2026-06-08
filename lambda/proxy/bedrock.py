@@ -2,7 +2,6 @@ import base64
 import json
 import logging
 from collections.abc import Generator
-from urllib.parse import unquote
 
 from botocore.exceptions import ClientError, ParamValidationError
 
@@ -28,35 +27,6 @@ class BedrockError(Exception):
         self.code = code
         self.message = message
         self.status = status
-
-
-def parse_route(event: dict) -> tuple[str, str]:
-    """Extract (model_id, route) from the APIGW rawPath.
-
-    Expected path: /model/{url-encoded-model-id}/converse
-                or /model/{url-encoded-model-id}/invoke
-
-    Model IDs contain colons (e.g. us.anthropic.claude-sonnet-4-6)
-    which are percent-encoded as %3A by clients. urllib.parse.unquote decodes them.
-
-    Converse API is the primary path for all supported models.
-    InvokeModel (/invoke) is used for models that do not support Converse
-    (e.g. Stable Diffusion, Titan Embeddings). Claude models support Converse.
-    Streaming (/invoke-with-response-stream) is not supported in v1.
-    """
-    raw_path = event.get("rawPath", "")
-    parts = raw_path.strip("/").split("/")
-    if len(parts) != 3 or parts[0] != "model":
-        raise BedrockError("BAD_REQUEST", f"Invalid path: {raw_path!r}", 400)
-    model_id = unquote(parts[1])
-    route = parts[2]
-    if route not in ("converse", "invoke"):
-        raise BedrockError(
-            "BAD_REQUEST",
-            f"Unsupported route {route!r}. Use 'converse' or 'invoke'.",
-            400,
-        )
-    return model_id, route
 
 
 def apply_output_cap(body: dict, route: str, max_output_tokens: int | None) -> dict:

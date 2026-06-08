@@ -354,10 +354,12 @@ def test_model_not_allowed(app_client):
     http_client, token_id, bearer_token, tables, stubber = app_client
     tokens_table, _, _ = tables
 
+    # Allowlist a model OTHER than the one the request targets (DEFAULT_MODEL),
+    # so the requested model is correctly rejected.
     tokens_table.update_item(
         Key={"token_id": token_id},
         UpdateExpression="SET allowed_models = :v",
-        ExpressionAttributeValues={":v": {"us.anthropic.claude-haiku-4-5-20251001-v1:0"}},
+        ExpressionAttributeValues={":v": {"us.anthropic.claude-sonnet-4-6"}},
     )
 
     with stubber:
