@@ -1,5 +1,5 @@
 # =============================================================================
-# CUTOVER RUNBOOK — R1 (two live deployments: primary roged10 + ccc roged10_ccc)
+# DEPLOYMENT RUNBOOK — two live deployments: primary (roged10) + ccc (roged10_ccc)
 # =============================================================================
 #
 # Per-deployment sequence (run TWICE: once per AWS profile):
@@ -14,35 +14,45 @@
 #   # full apply requires a real image_uri.
 #
 # Step 2 — Build and push the proxy image:
-#   ECR_URL=$(terraform output -raw ecr_repository_url 2>/dev/null || \
-#             terraform output -json | jq -r '.ecr_repository_url.value')
+#   ECR_URL=$(terraform output -raw ecr_repository_url)
 #   aws ecr get-login-password --region us-east-1 | \
 #     docker login --username AWS --password-stdin "$ECR_URL"
 #   docker buildx build --platform linux/amd64 --provenance=false \
 #     -t "$ECR_URL:latest" lambda/proxy/
 #   docker push "$ECR_URL:latest"
 #
-# Step 3 — Apply with coexistence (APIGW + Function URL live simultaneously):
+# Step 3 — Apply:
 #   terraform apply -var="image_uri=$ECR_URL:latest"
-#   # enable_http_api defaults to true: APIGW is kept alive, Function URL is
-#   # also created. No resources are destroyed in this apply.
 #
-# Step 4 — Validate the Function URL endpoint:
-#   FN_URL=$(terraform output -raw function_url)  # always the Function URL
-#   curl "$FN_URL/health"                          # expect {"status":"ok"}
-#   curl -H "Authorization: Bearer <token>" "$FN_URL/usage"
-#   # Run non-streaming parity checks against both /converse and /invoke routes.
-#   # api_url still points to the APIGW URL while enable_http_api=true.
+# Step 4 — Validate the REST API endpoint:
+#   API_URL=$(terraform output -raw api_url)
+#   curl "$API_URL/health"                           # expect {"status":"ok"}
+#   curl -H "Authorization: Bearer <token>" "$API_URL/usage"
 #
-# Step 5 — Cut clients over:
-#   Communicate the Function URL (function_url output) to all API consumers
-#   (update client configs, docs, env vars). APIGW endpoint remains live.
+# Architecture notes:
+#   - REST API: REGIONAL endpoint (5-min idle timeout, required for streaming)
+#   - Integration: AWS_PROXY + response_transfer_mode=STREAM + 900s timeout
+#   - Alias "live" with provisioned_concurrency=1 eliminates cold-start 500s
+#   - Stage "v1" with 20 rps / 40 burst throttle
 #
-# Step 6 — Retire APIGW (opt-in, AFTER client cutover):
-#   terraform apply -var="image_uri=$ECR_URL:latest" -var="enable_http_api=false"
-#   This destroys the APIGW HTTP API, routes, stage, and CloudWatch log group.
-#   api_url output will now return the Function URL.
-#   New deployments may set enable_http_api=false from the start.
+# State migration from the old Function URL + HTTP API v2 (already-applied deployments):
+#   Terraform `removed` blocks cannot address count-indexed module instances (module.api[0])
+#   in the current Terraform version. Destroy the old resources explicitly before applying:
+#
+#   terraform destroy -target='module.proxy.aws_lambda_function_url.proxy' \
+#     -var="image_uri=$ECR_URL:latest"
+#   terraform destroy -target='module.api[0].aws_apigatewayv2_api.main' \
+#     -var="image_uri=$ECR_URL:latest"
+#   # The apigatewayv2_api destroy cascades to routes, integrations, and the stage.
+#   # If the CW log group persists:
+#   terraform destroy -target='module.api[0].aws_cloudwatch_log_group.api_access' \
+#     -var="image_uri=$ECR_URL:latest"
+#   # Lambda permission for old APIGW (if still in state):
+#   terraform destroy -target='module.api[0].aws_lambda_permission.apigw' \
+#     -var="image_uri=$ECR_URL:latest"
+#
+#   Then run the full apply:
+#   terraform apply -var="image_uri=$ECR_URL:latest"
 #
 # =============================================================================
 
@@ -68,18 +78,4 @@ module "proxy" {
   usage_table_arn       = module.data.usage_table_arn
   rate_limit_table_name = module.data.rate_limit_table_name
   rate_limit_table_arn  = module.data.rate_limit_table_arn
-}
-
-# Legacy API Gateway HTTP API — count-gated by enable_http_api (default true).
-# Kept alive during the Function URL coexistence window so that existing clients
-# are not disrupted by a single apply. Set enable_http_api=false and re-apply
-# ONLY after all clients have been cut over to the Function URL (see runbook).
-module "api" {
-  count  = var.enable_http_api ? 1 : 0
-  source = "./modules/api"
-
-  name_prefix          = var.name_prefix
-  lambda_invoke_arn    = module.proxy.invoke_arn
-  lambda_function_name = module.proxy.function_name
-  log_retention_days   = var.log_retention_days
 }

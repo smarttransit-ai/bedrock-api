@@ -34,19 +34,13 @@ variable "lambda_memory_mb" {
 }
 
 variable "lambda_timeout_s" {
-  description = "Lambda function timeout in seconds."
+  description = "Lambda function timeout in seconds. Must be >= the API Gateway integration timeout (900s) to prevent Lambda from terminating streaming responses before the gateway gives up."
   type        = number
-  default     = 60
+  default     = 900
 }
 
 variable "lambda_reserved_concurrency" {
-  description = "Reserved concurrent executions cap for the proxy Lambda. Function URLs have no built-in throttling — this is the primary global rate cap. Enforce limit_rps on all production tokens."
+  description = "Reserved concurrent executions cap for the proxy Lambda. Account default is 1000; 50 is generous for lab-scale interactive use."
   type        = number
   default     = 50
-}
-
-variable "enable_http_api" {
-  description = "Keep the legacy API Gateway HTTP API alongside the Function URL. Set false to retire it AFTER clients are cut over to the Function URL. Default true so that a fresh apply is additive and the live APIGW is never destroyed without operator opt-in."
-  type        = bool
-  default     = true
 }
