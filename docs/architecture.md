@@ -11,10 +11,10 @@ A serverless AWS proxy that authenticates bearer tokens, enforces per-token limi
 ```mermaid
 graph LR
     Client["Client"]
-    APIGW["API Gateway<br/>bedrock-api-http"]
-    Lambda["Lambda<br/>bedrock-api-proxy"]
+    APIGW["API Gateway REST API<br/>bedrock-api-proxy (REGIONAL, streaming)"]
+    Lambda["Lambda (container, LWA)<br/>bedrock-api-proxy"]
     DynamoDB["DynamoDB<br/>3 tables"]
-    Bedrock["AWS Bedrock Runtime<br/>Converse + InvokeModel APIs"]
+    Bedrock["AWS Bedrock Runtime<br/>Converse(Stream) + InvokeModel(WithResponseStream)"]
     CloudWatch["CloudWatch<br/>logs · metrics · alarms"]
 
     Client -->|HTTPS| APIGW
@@ -38,15 +38,15 @@ graph LR
 graph TB
     Client["Client<br/>(Bearer bk_&lt;id&gt;.&lt;secret&gt;)"]
 
-    subgraph APIGW["API Gateway HTTP API — bedrock-api-http"]
-        Stage["$default stage<br/>throttle: 20 rps / 40 burst"]
-        RouteProxy["POST /model/{proxy+}"]
-        RouteUsage["GET /usage"]
-        RouteOther["any other path/method → 404"]
+    subgraph APIGW["API Gateway REST API — bedrock-api-proxy (REGIONAL)"]
+        Stage["v1 stage<br/>throttle: 20 rps / 40 burst<br/>response streaming (STREAM)"]
+        RouteProxy["ANY /{proxy+}"]
+        RouteRoot["ANY /"]
+        RouteOther["FastAPI routes by path → 404 if unknown"]
     end
 
-    subgraph Lambda["Lambda — bedrock-api-proxy"]
-        Handler["handler.handler<br/>Python 3.12 · 512 MB · 60s · concurrency 50"]
+    subgraph Lambda["Lambda — bedrock-api-proxy (container image, LWA)"]
+        Handler["FastAPI app via uvicorn<br/>alias 'live' · provisioned concurrency 1<br/>512 MB · 900s · reserved concurrency 50"]
     end
 
     subgraph DynamoDB["DynamoDB (PAY_PER_REQUEST)"]
@@ -55,20 +55,20 @@ graph TB
         RateLimit["bedrock-api-rate-limit<br/>PK: token_id · SK: window_second<br/>TTL: ttl"]
     end
 
-    Bedrock["AWS Bedrock Runtime<br/>/converse → Converse API<br/>/invoke → InvokeModel API"]
+    Bedrock["AWS Bedrock Runtime<br/>/converse(-stream) → Converse(Stream)<br/>/invoke(-with-response-stream) → InvokeModel(WithResponseStream)"]
 
     subgraph CW["CloudWatch"]
         LogLambda["/aws/lambda/bedrock-api-proxy"]
-        LogAPI["/aws/apigateway/bedrock-api-http"]
+        LogAPI["/aws/apigateway/bedrock-api-proxy"]
         Alarm["Alarm: bedrock-api-pricing-fallback-high"]
     end
 
     Client -->|HTTPS| Stage
     Stage --> RouteProxy
-    Stage --> RouteUsage
+    Stage --> RouteRoot
     Stage --> RouteOther
-    RouteProxy -->|AWS_PROXY integration| Handler
-    RouteUsage -->|AWS_PROXY integration| Handler
+    RouteProxy -->|AWS_PROXY · STREAM| Handler
+    RouteRoot -->|AWS_PROXY · STREAM| Handler
     Handler -->|GetItem| Tokens
     Handler -->|GetItem + UpdateItem| Usage
     Handler -->|UpdateItem| RateLimit
@@ -90,7 +90,7 @@ graph TB
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant GW as API Gateway<br/>bedrock-api-http
+    participant GW as API Gateway REST<br/>bedrock-api-proxy
     participant L as Lambda<br/>bedrock-api-proxy
     participant T as DynamoDB<br/>bedrock-api-tokens
     participant U as DynamoDB<br/>bedrock-api-usage
@@ -98,7 +98,7 @@ sequenceDiagram
     participant B as Bedrock Runtime
 
     C->>GW: POST /model/{modelId}/converse<br/>Authorization: Bearer bk_<id>.<secret>
-    GW->>L: invoke (payload format 2.0)
+    GW->>L: invoke (AWS_PROXY, payload format 1.0)
 
     Note over L: 1. parse bearer token (header only)
     L->>T: GetItem {token_id}

@@ -4,7 +4,8 @@ The proxy accepts standard [AWS Bedrock Converse](https://docs.aws.amazon.com/be
 and InvokeModel request bodies. Authentication is a bearer token in the
 `Authorization` header — no SigV4 signing required.
 
-**Streaming is not supported in v1.**
+**Streaming is supported** via the `converse-stream` / `invoke-with-response-stream`
+routes (Server-Sent Events) — see [Streaming](#streaming).
 
 Your token is provisioned with a **${{BUDGET_USD}}/month USD budget**. Once exhausted,
 requests return `429 MONTHLY_BUDGET_EXCEEDED` until the next billing period.
@@ -36,7 +37,11 @@ cannot be recovered later.
 ```
 POST {API_URL}/model/{url-encoded-model-id}/converse
 POST {API_URL}/model/{url-encoded-model-id}/invoke
+POST {API_URL}/model/{url-encoded-model-id}/converse-stream                # SSE
+POST {API_URL}/model/{url-encoded-model-id}/invoke-with-response-stream    # SSE
 ```
+
+The `{API_URL}` above already includes the `/v1` stage (see Your credentials).
 
 Model IDs contain colons (`:`), which must be percent-encoded as `%3A`:
 
@@ -172,7 +177,26 @@ print(response["output"]["message"]["content"][0]["text"])
 `UNSIGNED` removes all AWS credential headers. The `before-send` hook then
 adds `Authorization: Bearer <token>` before the HTTP request is dispatched.
 boto3 constructs the URL path (`/model/{modelId}/converse`) automatically, so
-no manual URL encoding is needed when using the SDK.
+no manual URL encoding is needed when using the SDK. Set `endpoint_url` to the
+full URL including `/v1`.
+
+---
+
+## Streaming
+
+The `converse-stream` / `invoke-with-response-stream` routes return
+**Server-Sent Events** (`Content-Type: text/event-stream`). Each event is a
+`data: {json}\n\n` frame relaying the raw Bedrock stream event verbatim; the
+final `metadata` event carries token usage. A pre-stream failure (auth,
+throttling, bad params) is a normal HTTP error; a mid-stream failure arrives as
+a terminal `data: {"error": {...}}` frame on an already-200 response.
+
+```bash
+curl -sN -X POST "${API_URL}/model/${MODEL}/converse-stream" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":[{"text":"Hello!"}]}]}'
+```
 
 ---
 

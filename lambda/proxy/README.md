@@ -7,28 +7,29 @@ limit types, and forwards requests to AWS Bedrock.
 
 ## Entry point
 
-```
-handler.handler
-```
-
-Python 3.12 runtime. No external dependencies — `boto3` and `botocore` are
-provided by the Lambda runtime.
+A FastAPI app (`app.py`) served by uvicorn behind the **AWS Lambda Web Adapter
+(LWA)** in a container image (`Dockerfile`), invoke mode `RESPONSE_STREAM`.
+Python 3.12; dependencies (`fastapi`, `uvicorn`, `boto3`) are baked into the
+image from `requirements.txt`.
 
 ---
 
 ## Request routing
 
-The Lambda receives requests from **API Gateway HTTP API v2**
-(`payloadFormatVersion=2.0`). The URL path determines which Bedrock API to call:
+The Lambda sits behind an **API Gateway REST API** (REGIONAL, AWS_PROXY,
+payload format 1.0, response streaming). FastAPI routes by URL path:
 
 | Path | Bedrock API | Notes |
 |---|---|---|
-| `/model/{modelId}/converse` | `bedrock-runtime.converse()` | Primary path; Claude, Llama, Mistral |
-| `/model/{modelId}/invoke` | `bedrock-runtime.invoke_model()` | Fallback; image/embedding models |
+| `/model/{modelId}/converse` | `converse()` | Primary path; Claude, Llama, Mistral |
+| `/model/{modelId}/invoke` | `invoke_model()` | image/embedding models |
+| `/model/{modelId}/converse-stream` | `converse_stream()` | SSE streaming |
+| `/model/{modelId}/invoke-with-response-stream` | `invoke_model_with_response_stream()` | SSE streaming |
 
-`modelId` is percent-encoded in the URL (`:` → `%3A`).
-
-**Streaming** (`/invoke-with-response-stream`) is not supported in v1.
+`modelId` is percent-encoded in the URL (`:` → `%3A`); FastAPI decodes it. The
+streaming routes return Server-Sent Events and bill usage post-flight from the
+terminal `metadata` event. The REST API stage (`/v1`) is stripped before the
+app sees the path.
 
 ---
 
@@ -128,7 +129,7 @@ The `limit_max_input_tokens` cap is enforced using the heuristic:
 estimated_tokens = ceil(total_prompt_chars / 4)
 ```
 
-This avoids shipping a tokenizer (which would exceed the 5 MB ZIP budget).
+This avoids shipping a tokenizer (extra image weight and cold-start cost).
 The cap is a **ceiling guard**; the true token count from Bedrock's response
 metadata is what's used for billing.
 
@@ -150,7 +151,7 @@ All log lines are JSON to CloudWatch Logs. Fields:
 
 | Field | Notes |
 |---|---|
-| `event` | `request_complete`, `request_rejected`, or `usage_write_failed` |
+| `event` | `request_complete`, `request_rejected`, `usage_write_failed`, `billing_failed`, `stream_error` |
 | `token_id` | The `bk_<32hex>` prefix only — never the secret |
 | `owner` | Human label from the token row |
 | `model_id` | Bedrock model/profile ID |
@@ -182,8 +183,14 @@ already received a valid Bedrock response.
 
 ## Packaging
 
+Built as a container image and pushed to ECR:
+
 ```bash
-make package        # produces dist/proxy.zip
+docker buildx build --platform linux/amd64 --provenance=false \
+  -t "$ECR_URL:latest" lambda/proxy/
+docker push "$ECR_URL:latest"
 ```
 
-ZIP excludes `*.pyc` and `__pycache__/`. Size target: ≤ 5 MB (boto3 excluded).
+The image bundles the FastAPI app, its dependencies (`requirements.txt`), and
+the Lambda Web Adapter. `.dockerignore` excludes tests, `*.md`, and
+`__pycache__/`.

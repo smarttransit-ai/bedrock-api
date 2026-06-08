@@ -45,26 +45,29 @@ Note the printed outputs (bucket name, region, table name).
 
 ### 2. Wire the remote backend for the main stack
 
+`terraform/main/backend.tf` is a **partial** config; write this deployment's
+bucket/key/lock to a `.tfbackend` file (state is per deployment account):
+
 ```bash
-# From terraform/bootstrap — generates a ready-to-paste backend block
-terraform output -raw backend_block > ../main/backend.tf
+# From terraform/bootstrap (run once per deployment account):
+terraform output -raw backend_config > ../main/primary.s3.tfbackend
 ```
 
-Commit `terraform/main/backend.tf`.
+Commit the `.tfbackend` file (it holds only bucket/table names, no secrets).
 
 ### 3. Configure variables
 
 ```bash
 cd terraform/main
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars: set region, name_prefix, and optionally
-# domain_name + hosted_zone_id for a custom domain.
+# Edit terraform.tfvars: region, name_prefix, and the per-deployment knobs
+# (provisioned_concurrency, throttling_*, apigw_cloudwatch_role_already_set).
 ```
 
 ### 4. Apply the main stack
 
 ```bash
-terraform init
+terraform init -reconfigure -backend-config=primary.s3.tfbackend
 terraform plan
 terraform apply
 ```

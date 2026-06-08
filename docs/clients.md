@@ -4,7 +4,8 @@ The proxy accepts standard [AWS Bedrock Converse](https://docs.aws.amazon.com/be
 and InvokeModel request bodies. Authentication is a bearer token in the
 `Authorization` header — no SigV4 signing required.
 
-**Streaming is not supported in v1.**
+**Streaming is supported** via the `converse-stream` / `invoke-with-response-stream`
+routes (Server-Sent Events) — see [Streaming](#streaming).
 
 ---
 
@@ -13,7 +14,12 @@ and InvokeModel request bodies. Authentication is a bearer token in the
 ```
 POST {API_URL}/model/{url-encoded-model-id}/converse
 POST {API_URL}/model/{url-encoded-model-id}/invoke
+POST {API_URL}/model/{url-encoded-model-id}/converse-stream                # SSE
+POST {API_URL}/model/{url-encoded-model-id}/invoke-with-response-stream    # SSE
 ```
+
+`{API_URL}` includes the API Gateway stage, e.g.
+`https://<id>.execute-api.us-east-1.amazonaws.com/v1`.
 
 Model IDs contain colons (`:`), which must be percent-encoded as `%3A`:
 
@@ -27,7 +33,7 @@ Model IDs contain colons (`:`), which must be percent-encoded as `%3A`:
 ## curl
 
 ```bash
-API_URL="https://abc123.execute-api.us-east-1.amazonaws.com"
+API_URL="https://abc123.execute-api.us-east-1.amazonaws.com/v1"
 TOKEN="bk_<32hex>.<64hex>"
 MODEL="us.anthropic.claude-sonnet-4-6"
 
@@ -49,7 +55,7 @@ curl -s -X POST "${API_URL}/model/${MODEL}/converse" \
 from urllib.parse import quote
 import httpx
 
-API_URL = "https://abc123.execute-api.us-east-1.amazonaws.com"
+API_URL = "https://abc123.execute-api.us-east-1.amazonaws.com/v1"
 TOKEN = "bk_<32hex>.<64hex>"
 MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
@@ -81,7 +87,7 @@ import boto3
 from botocore import UNSIGNED
 from botocore.config import Config
 
-API_URL = "https://abc123.execute-api.us-east-1.amazonaws.com"
+API_URL = "https://abc123.execute-api.us-east-1.amazonaws.com/v1"
 TOKEN = "bk_<32hex>.<64hex>"
 
 client = boto3.client(
@@ -111,7 +117,41 @@ print(response["output"]["message"]["content"][0]["text"])
 `UNSIGNED` removes all AWS credential headers. The `before-send` hook then
 adds `Authorization: Bearer <token>` before the HTTP request is dispatched.
 boto3 constructs the URL path (`/model/{modelId}/converse`) automatically, so
-no manual URL encoding is needed when using the SDK.
+no manual URL encoding is needed when using the SDK. Set `endpoint_url` to the
+full stage URL including `/v1`.
+
+---
+
+## Streaming
+
+The `converse-stream` and `invoke-with-response-stream` routes return
+**Server-Sent Events** (`Content-Type: text/event-stream`). Each event is a
+`data: {json}\n\n` frame relaying the raw Bedrock stream event verbatim (no
+transform); the final `metadata` event carries the token usage.
+
+Errors are handled by position: a failure *before* the stream opens (auth,
+throttling, bad params) returns a normal HTTP 4xx/5xx JSON error; a failure
+*mid-stream* arrives as a terminal `data: {"error": {...}}` frame on an
+already-200 response.
+
+```bash
+curl -sN -X POST "${API_URL}/model/${MODEL}/converse-stream" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":[{"text":"Hello!"}]}]}'
+```
+
+```
+data: {"messageStart": {"role": "assistant"}}
+data: {"contentBlockDelta": {"delta": {"text": "Hello"}, "contentBlockIndex": 0}}
+data: {"contentBlockStop": {"contentBlockIndex": 0}}
+data: {"messageStop": {"stopReason": "end_turn"}}
+data: {"metadata": {"usage": {"inputTokens": 10, "outputTokens": 4, "totalTokens": 14}}}
+```
+
+`invoke-with-response-stream` relays the InvokeModel chunk payloads the same way
+(each chunk's bytes decoded to JSON, bytes-valued fields base64-encoded for
+transport).
 
 ---
 
