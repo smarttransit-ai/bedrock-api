@@ -52,21 +52,21 @@ terraform apply
 
 Note the printed outputs.
 
-### 2. Fill in `backend.tf`
+### 2. Backend state is per-deployment
 
-Run the following to get a ready-to-paste backend block:
+`backend.tf` is a **partial** config — `bucket`, `key`, and `dynamodb_table` come from a per-deployment `-backend-config` file so each account keeps its own isolated state:
 
-```bash
-terraform output -raw backend_block
-```
+- `primary.s3.tfbackend` (committed) → account 343084147688 (profile `roged10`)
+- `ccc.s3.tfbackend` → account 066949051849 (profile `roged10_ccc`). Fill in the ccc-owned state bucket + lock table; if they don't exist yet, run `terraform/bootstrap` in the ccc account first.
 
-Open `terraform/main/backend.tf` and replace the `PLACEHOLDER-*` values with the real bucket name, region, and lock table name from the bootstrap output.
+Switching only `AWS_PROFILE` does **not** switch state — you must re-init with the right `-backend-config`.
 
 ### 3. Initialize the main stack
 
 ```bash
 cd terraform/main
-AWS_PROFILE=roged10 AWS_REGION=us-east-1 terraform init
+AWS_PROFILE=roged10 AWS_REGION=us-east-1 \
+  terraform init -reconfigure -backend-config=primary.s3.tfbackend
 ```
 
 ### 4. Configure variables
@@ -110,28 +110,20 @@ Run for both deployments:
 
 ---
 
-## State migration (for already-applied deployments)
+## Migration from the old HTTP API v2 deployment
 
-When migrating from the old Lambda Function URL + HTTP API v2 architecture, destroy the old resources explicitly before running the full apply (the `destroy -target` approach actually removes AWS resources, unlike `state rm` which only orphans them):
+The **ccc** deployment is still on the pre-streaming architecture (HTTP API v2, ZIP Lambda). Removing the `module "api"` block from this config means a normal apply already plans the destruction of the old resources as orphans — `apigatewayv2` api/routes/integration/stage, its access-log group, and the old Lambda permission. No `-target` surgery or `removed`/`moved` blocks are needed. The proxy Lambda also changes from a ZIP package to a container image, so it is **replaced** in place.
+
+Always review the plan before applying:
 
 ```bash
-# Destroy old Function URL
-terraform destroy -target='module.proxy.aws_lambda_function_url.proxy' \
-  -var="image_uri=$ECR_URL:latest"
-
-# Destroy old HTTP API (cascades to routes, integrations, stage)
-terraform destroy -target='module.api[0].aws_apigatewayv2_api.main' \
-  -var="image_uri=$ECR_URL:latest"
-
-# Destroy remaining resources if still in state
-terraform destroy -target='module.api[0].aws_cloudwatch_log_group.api_access' \
-  -var="image_uri=$ECR_URL:latest"
-terraform destroy -target='module.api[0].aws_lambda_permission.apigw' \
-  -var="image_uri=$ECR_URL:latest"
-
-# Then apply the full new config
-terraform apply -var="image_uri=$ECR_URL:latest"
+AWS_PROFILE=roged10_ccc AWS_REGION=us-east-1 \
+  terraform plan  -var="image_uri=$ECR_URL:latest"   # review the orphan destroys + Lambda replace
+AWS_PROFILE=roged10_ccc AWS_REGION=us-east-1 \
+  terraform apply -var="image_uri=$ECR_URL:latest"
 ```
+
+Before the first ccc apply, also decide `apigw_cloudwatch_role_already_set` (see Variables) — check with `aws apigateway get-account --profile roged10_ccc`.
 
 ---
 
@@ -145,17 +137,12 @@ terraform apply -var="image_uri=$ECR_URL:latest"
 | `default_models` | `""` | Comma-separated system-wide model allowlist (`ALLOWED_MODELS_DEFAULT`). Empty = no system restriction. |
 | `log_retention_days` | `14` | CloudWatch log retention in days |
 | `lambda_memory_mb` | `512` | Lambda memory in MB |
-| `lambda_timeout_s` | `60` | Lambda timeout in seconds |
+| `lambda_timeout_s` | `900` | Lambda timeout in seconds. Must be >= the 900s API Gateway integration timeout, or streaming responses get killed mid-stream. |
 | `lambda_reserved_concurrency` | `50` | Reserved concurrent executions cap |
-
-### Proxy module variables
-
-| Name | Default | Description |
-|---|---|---|
 | `provisioned_concurrency` | `1` | Provisioned concurrent executions on alias "live". Set to 0 to disable (not recommended). |
-| `throttling_rate_limit` | `20` | Stage-level steady-state rps |
-| `throttling_burst_limit` | `40` | Stage-level burst rps |
-| `apigw_cloudwatch_role_already_set` | `false` | Skip creating account-level CloudWatch role if already configured |
+| `throttling_rate_limit` | `20` | API Gateway stage steady-state rps |
+| `throttling_burst_limit` | `40` | API Gateway stage burst rps |
+| `apigw_cloudwatch_role_already_set` | `false` | Skip creating the account-level API Gateway CloudWatch role if already configured. `aws_api_gateway_account` is account-global. Check: `aws apigateway get-account`. |
 
 ---
 

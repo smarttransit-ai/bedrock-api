@@ -36,10 +36,12 @@ from moto import mock_aws
 TOKENS_TABLE = os.environ["TOKENS_TABLE"]
 USAGE_TABLE = os.environ["USAGE_TABLE"]
 RATE_LIMIT_TABLE = os.environ["RATE_LIMIT_TABLE"]
-DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6-20250514-v1:0"
+# A real catalog entry (priced, not fallback) that also contains a colon, so the
+# encoded form below exercises %3A path-decoding on every request that uses it.
+DEFAULT_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 # URL-encoded form: colons in path segments must be percent-encoded (%3A).
 # FastAPI/Starlette decodes %3A → ':' before it reaches the route handler.
-ENCODED_MODEL = "us.anthropic.claude-sonnet-4-6-20250514-v1%3A0"
+ENCODED_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1%3A0"
 
 
 # ---------------------------------------------------------------------------

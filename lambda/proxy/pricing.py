@@ -4159,21 +4159,12 @@ def _normalize_pricing_map(raw_map: dict) -> PricingMap:
                 mode_map["batch"] = _normalize_rates(value.get("batch", {}))
             normalized[model_id] = mode_map
             continue
-        else:
-            on_demand = _normalize_rates(value)
-            normalized[model_id] = {
-                "on_demand": on_demand,
-                "batch": {
-                    "input_usd_micros_per_1k": max(1, on_demand["input_usd_micros_per_1k"] // 2),
-                    "output_usd_micros_per_1k": max(1, on_demand["output_usd_micros_per_1k"] // 2),
-                    "cache_read_input_usd_micros_per_1k": max(
-                        1, on_demand["cache_read_input_usd_micros_per_1k"] // 2
-                    ),
-                    "cache_write_input_usd_micros_per_1k": max(
-                        1, on_demand["cache_write_input_usd_micros_per_1k"] // 2
-                    ),
-                },
-            }
+        # Flat-format entry (bare rates, no on_demand/batch keys). This is not the
+        # documented PRICING_JSON shape, but tolerate it by mirroring on_demand into
+        # batch — consistent with the fallback policy (batch == on_demand) rather
+        # than inventing an arbitrary discount.
+        rates = _normalize_rates(value)
+        normalized[model_id] = {"on_demand": rates, "batch": rates}
     return normalized
 
 

@@ -1,7 +1,8 @@
 """FastAPI proxy application — entry point for the LWA container Lambda.
 
-Replaces handler.py. Served by uvicorn via the AWS Lambda Web Adapter (LWA)
-with invoke_mode=RESPONSE_STREAM on a Lambda Function URL.
+Served by uvicorn via the AWS Lambda Web Adapter (LWA) with
+invoke_mode=RESPONSE_STREAM, behind an API Gateway REST API (REGIONAL) whose
+AWS_PROXY integration runs in response-streaming (STREAM) mode.
 
 Environment variables (required):
   TOKENS_TABLE      — DynamoDB tokens table name
@@ -23,7 +24,7 @@ Pre-flight order (cheap rejects first):
   7. monthly USD budget      ┘                            → 429
   8. input token cap heuristic (ceil(chars/4))            → 413
   9. model allowlist check                                → 403
- 10. apply output cap (handler step, not preflight)
+ 10. apply output cap (route step, not preflight)
  11. forward to Bedrock
  12. post-flight usage ADD (failure → log ERROR, still return 200)
 
@@ -87,7 +88,7 @@ app = FastAPI()
 
 @dataclass
 class PreflightResult:
-    """Result of run_preflight — raw parsed body (output cap applied by handler)."""
+    """Result of run_preflight — raw parsed body (output cap applied by the route)."""
 
     token_id: str
     token_row: dict
@@ -178,13 +179,12 @@ async def run_preflight(
     model_id: str,
     route: str,
     tables,
-    bedrock_client,
 ) -> PreflightResult:
     """Execute pre-flight steps 1–9 and return a PreflightResult.
 
     Raises AuthError, LimitError, or BedrockError on rejection.
     Output cap (apply_output_cap) is NOT applied here — it is a separate
-    handler step (amendment B5) so each route applies it explicitly.
+    route step (amendment B5) so each route applies it explicitly.
     """
     start_ms = time.monotonic() * 1000
     tokens_table, usage_table, rate_limit_table = tables
@@ -259,19 +259,24 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/model/{model_id}/converse")
-async def converse(
+async def _run_nonstreaming(
     model_id: str,
     request: Request,
-    tables=Depends(get_tables),
-    bedrock_client=Depends(get_bedrock),
+    tables,
+    bedrock_client,
+    route: str,
+    forward_fn,
 ):
-    """POST /model/{model_id}/converse — non-streaming Converse API proxy."""
+    """Shared body for the non-streaming converse/invoke routes.
+
+    The two routes differ only by route name and the Bedrock forward function;
+    the pre-flight, output-cap, billing, and logging flow is identical.
+    """
     start_ms = time.monotonic() * 1000
     log_ctx: dict = {}
 
     try:
-        pf = await run_preflight(request, model_id, "converse", tables, bedrock_client)
+        pf = await run_preflight(request, model_id, route, tables)
         log_ctx = pf.log_ctx
         start_ms = pf.start_ms
 
@@ -281,9 +286,9 @@ async def converse(
             if "limit_max_output_tokens" in pf.token_row
             else None
         )
-        body = apply_output_cap(pf.body, "converse", max_out)
+        body = apply_output_cap(pf.body, route, max_out)
 
-        bedrock_resp, usage = forward_converse(bedrock_client, model_id, body)
+        bedrock_resp, usage = forward_fn(bedrock_client, model_id, body)
 
         in_tok = usage["input_tokens"]
         out_tok = usage["output_tokens"]
@@ -355,6 +360,19 @@ async def converse(
             json.dumps({**log_ctx, "event": "unhandled_error", "latency_ms": latency_ms})
         )
         return _error_json(500, "INTERNAL_ERROR", "Internal server error")
+
+
+@app.post("/model/{model_id}/converse")
+async def converse(
+    model_id: str,
+    request: Request,
+    tables=Depends(get_tables),
+    bedrock_client=Depends(get_bedrock),
+):
+    """POST /model/{model_id}/converse — non-streaming Converse API proxy."""
+    return await _run_nonstreaming(
+        model_id, request, tables, bedrock_client, "converse", forward_converse
+    )
 
 
 @app.post("/model/{model_id}/invoke")
@@ -365,94 +383,9 @@ async def invoke(
     bedrock_client=Depends(get_bedrock),
 ):
     """POST /model/{model_id}/invoke — non-streaming InvokeModel API proxy."""
-    start_ms = time.monotonic() * 1000
-    log_ctx: dict = {}
-
-    try:
-        pf = await run_preflight(request, model_id, "invoke", tables, bedrock_client)
-        log_ctx = pf.log_ctx
-        start_ms = pf.start_ms
-
-        # B5: Apply output cap explicitly as a separate step (not in preflight).
-        max_out = (
-            int(pf.token_row["limit_max_output_tokens"])
-            if "limit_max_output_tokens" in pf.token_row
-            else None
-        )
-        body = apply_output_cap(pf.body, "invoke", max_out)
-
-        bedrock_resp, usage = forward_invoke_model(bedrock_client, model_id, body)
-
-        in_tok = usage["input_tokens"]
-        out_tok = usage["output_tokens"]
-        cache_read_tok = usage["cache_read_input_tokens"]
-        cache_write_tok = usage["cache_write_input_tokens"]
-        log_ctx.update(
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            cache_read_input_tokens=cache_read_tok,
-            cache_write_input_tokens=cache_write_tok,
-        )
-
-        (
-            usd_micros,
-            component_micros,
-            fallback_applied,
-            fallback_dimensions,
-            applied_rates,
-        ) = compute_cost(
-            model_id=model_id,
-            pricing_mode=pf.pricing_mode,
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            cache_read_input_tokens=cache_read_tok,
-            cache_write_input_tokens=cache_write_tok,
-        )
-        log_ctx["usd_micros"] = usd_micros
-        logger.info(
-            json.dumps(
-                {
-                    **log_ctx,
-                    "event": "pricing_audit",
-                    "component_micros": component_micros,
-                    "applied_rates": applied_rates,
-                    "fallback_applied": fallback_applied,
-                    "fallback_dimensions": fallback_dimensions,
-                    "status": 200,
-                }
-            )
-        )
-
-        try:
-            write_usage(
-                pf.token_id,
-                pf.period,
-                in_tok,
-                out_tok,
-                cache_read_tok,
-                cache_write_tok,
-                usd_micros,
-                pf.usage_table,
-            )
-        except Exception as exc:
-            logger.error(json.dumps({**log_ctx, "event": "usage_write_failed", "error": str(exc)}))
-
-        latency_ms = int((time.monotonic() * 1000) - start_ms)
-        logger.info(
-            json.dumps(
-                {**log_ctx, "event": "request_complete", "status": 200, "latency_ms": latency_ms}
-            )
-        )
-        return JSONResponse(bedrock_resp)
-
-    except (AuthError, LimitError, BedrockError) as exc:
-        return _handle_known_error(exc, log_ctx, start_ms)
-    except Exception:
-        latency_ms = int((time.monotonic() * 1000) - start_ms)
-        logger.exception(
-            json.dumps({**log_ctx, "event": "unhandled_error", "latency_ms": latency_ms})
-        )
-        return _error_json(500, "INTERNAL_ERROR", "Internal server error")
+    return await _run_nonstreaming(
+        model_id, request, tables, bedrock_client, "invoke", forward_invoke_model
+    )
 
 
 @app.get("/usage")
@@ -660,6 +593,15 @@ def _sse_stream(event_iter, usage_out: dict, pf: PreflightResult, log_ctx: dict)
         for event in event_iter:
             yield f"data: {json.dumps(event, default=_sse_json_default)}\n\n"
     except BedrockError as exc:
+        # Mid-stream Bedrock error after a 200 + headers were already sent. Log a
+        # terminal event for observability parity with the non-streaming reject
+        # path: _post_flight_write skips when no usage arrived before the error,
+        # so without this the request would vanish from the logs.
+        logger.warning(
+            json.dumps(
+                {**log_ctx, "event": "stream_error", "error_code": exc.code, "status": exc.status}
+            )
+        )
         yield (f"data: {json.dumps({'error': {'code': exc.code, 'message': exc.message}})}\n\n")
     except Exception as exc:
         logger.exception(json.dumps({**log_ctx, "event": "stream_error", "error": str(exc)}))
@@ -677,19 +619,26 @@ def _sse_stream(event_iter, usage_out: dict, pf: PreflightResult, log_ctx: dict)
 # ---------------------------------------------------------------------------
 
 
-@app.post("/model/{model_id}/converse-stream")
-async def converse_stream(
+async def _run_streaming(
     model_id: str,
     request: Request,
-    tables=Depends(get_tables),
-    bedrock_client=Depends(get_bedrock),
+    tables,
+    bedrock_client,
+    route: str,
+    open_fn,
+    iter_fn,
+    stream_key: str,
 ):
-    """POST /model/{model_id}/converse-stream — streaming Converse API proxy."""
+    """Shared body for the streaming converse/invoke routes.
+
+    The two routes differ only by route name, the Bedrock stream-open and
+    per-event iterator functions, and the response key holding the event stream.
+    """
     start_ms = time.monotonic() * 1000
     log_ctx: dict = {}
 
     try:
-        pf = await run_preflight(request, model_id, "converse", tables, bedrock_client)
+        pf = await run_preflight(request, model_id, route, tables)
         log_ctx = pf.log_ctx
         start_ms = pf.start_ms
 
@@ -699,11 +648,11 @@ async def converse_stream(
             if "limit_max_output_tokens" in pf.token_row
             else None
         )
-        body = apply_output_cap(pf.body, "converse", max_out)
+        body = apply_output_cap(pf.body, route, max_out)
 
         # B1: Eager stream open — SDK call BEFORE StreamingResponse so call-time
         # errors (throttling, param validation) return real 4xx/5xx.
-        response = open_converse_stream(bedrock_client, model_id, body)
+        response = open_fn(bedrock_client, model_id, body)
 
     except (AuthError, LimitError, BedrockError) as exc:
         return _handle_known_error(exc, log_ctx, start_ms)
@@ -718,14 +667,29 @@ async def converse_stream(
     usage_out: dict = {}
 
     return StreamingResponse(
-        _sse_stream(
-            iter_converse_stream(response["stream"], usage_out),
-            usage_out,
-            pf,
-            log_ctx,
-        ),
+        _sse_stream(iter_fn(response[stream_key], usage_out), usage_out, pf, log_ctx),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/model/{model_id}/converse-stream")
+async def converse_stream(
+    model_id: str,
+    request: Request,
+    tables=Depends(get_tables),
+    bedrock_client=Depends(get_bedrock),
+):
+    """POST /model/{model_id}/converse-stream — streaming Converse API proxy."""
+    return await _run_streaming(
+        model_id,
+        request,
+        tables,
+        bedrock_client,
+        "converse",
+        open_converse_stream,
+        iter_converse_stream,
+        "stream",
     )
 
 
@@ -737,44 +701,13 @@ async def invoke_with_response_stream(
     bedrock_client=Depends(get_bedrock),
 ):
     """POST /model/{model_id}/invoke-with-response-stream — streaming InvokeModel proxy."""
-    start_ms = time.monotonic() * 1000
-    log_ctx: dict = {}
-
-    try:
-        pf = await run_preflight(request, model_id, "invoke", tables, bedrock_client)
-        log_ctx = pf.log_ctx
-        start_ms = pf.start_ms
-
-        # B5: Apply output cap
-        max_out = (
-            int(pf.token_row["limit_max_output_tokens"])
-            if "limit_max_output_tokens" in pf.token_row
-            else None
-        )
-        body = apply_output_cap(pf.body, "invoke", max_out)
-
-        # B1: Eager stream open — SDK call BEFORE StreamingResponse
-        response = open_invoke_stream(bedrock_client, model_id, body)
-
-    except (AuthError, LimitError, BedrockError) as exc:
-        return _handle_known_error(exc, log_ctx, start_ms)
-    except Exception:
-        latency_ms = int((time.monotonic() * 1000) - start_ms)
-        logger.exception(
-            json.dumps({**log_ctx, "event": "unhandled_error", "latency_ms": latency_ms})
-        )
-        return _error_json(500, "INTERNAL_ERROR", "Internal server error")
-
-    # SSE generator
-    usage_out: dict = {}
-
-    return StreamingResponse(
-        _sse_stream(
-            iter_invoke_stream(response["body"], usage_out),
-            usage_out,
-            pf,
-            log_ctx,
-        ),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    return await _run_streaming(
+        model_id,
+        request,
+        tables,
+        bedrock_client,
+        "invoke",
+        open_invoke_stream,
+        iter_invoke_stream,
+        "body",
     )

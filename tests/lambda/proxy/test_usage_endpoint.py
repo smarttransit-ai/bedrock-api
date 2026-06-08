@@ -51,16 +51,18 @@ def _seed_usage(usage_table, token_id: str, **kwargs):
 
 
 @pytest.fixture()
-def usage_client(test_token, bedrock_stub):
-    """TestClient with dependency_overrides cleared at teardown."""
+def usage_client(test_token):
+    """TestClient with dependency_overrides cleared at teardown.
+
+    GET /usage depends only on get_tables (no Bedrock), so it does not override
+    get_bedrock.
+    """
     from app import app
-    from deps import get_bedrock, get_tables
+    from deps import get_tables
     from fastapi.testclient import TestClient
 
     token_id, bearer_token, tables = test_token
-    client_bedrock, _stubber = bedrock_stub
     app.dependency_overrides[get_tables] = lambda: tables
-    app.dependency_overrides[get_bedrock] = lambda: client_bedrock
     http_client = TestClient(app, raise_server_exceptions=False)
     yield http_client, token_id, bearer_token, tables
     app.dependency_overrides.clear()

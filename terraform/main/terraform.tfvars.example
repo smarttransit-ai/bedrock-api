@@ -2,5 +2,19 @@ region             = "us-east-1"
 name_prefix        = "bedrock-api"
 log_retention_days = 14
 lambda_memory_mb   = 512
-lambda_timeout_s   = 60
+# Must be >= the 900s API Gateway integration timeout, or streaming responses
+# get killed mid-stream when the Lambda times out first.
+lambda_timeout_s   = 900
 default_models     = ""
+
+# Provisioned concurrency on the 'live' alias (eliminates cold-start 500s).
+provisioned_concurrency = 1
+
+# API Gateway stage throttle (steady-state / burst requests per second).
+throttling_rate_limit  = 20
+throttling_burst_limit = 40
+
+# Set true ONLY if this account already has an API Gateway CloudWatch role
+# (aws_api_gateway_account is account-global). Check: aws apigateway get-account.
+# Leave false on a fresh account so the role + account config are created.
+apigw_cloudwatch_role_already_set = false

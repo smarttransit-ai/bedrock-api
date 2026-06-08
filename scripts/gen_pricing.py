@@ -12,18 +12,21 @@ lambda/proxy/pricing.py, replacing the existing block between the top
 comment and the _FALLBACK_BY_MODE definition.
 
 --- Refresh procedure ---
-1. Fetch the upstream litellm JSON (URL: BerriAI/litellm raw
+1. Fetch the upstream litellm JSON (BerriAI/litellm raw
    model_prices_and_context_window.json on main) into /tmp/litellm_full.json.
    The full source URL is in scripts/vendor/litellm_model_prices.json (_meta.source).
-2. Filter to routeable Bedrock entries (both token cost fields present; no / in key after
-   stripping bedrock/), strip bedrock/ prefix from keys, keep only pricing fields, sort keys,
-   prepend _meta block:
-       jq '...' /tmp/litellm_full.json > scripts/vendor/litellm_model_prices.json
-   (see the jq command in LITELLM_PRICING_PLAN.md Step 1)
+2. Filter to routeable Bedrock entries (both input+output token cost fields present; no '/'
+   in the key after stripping the bedrock/ prefix), strip the bedrock/ prefix from keys,
+   keep only the pricing fields, sort keys, and prepend the _meta block; write the result to
+   scripts/vendor/litellm_model_prices.json.
 3. Update _meta.upstream_commit and _meta.fetched_date in the vendor file.
-4. Run this script and paste the output into lambda/proxy/pricing.py.
-5. If new model IDs appear in DEFAULT_PRICING, regenerate supported_model_ids.txt
-   (see Step 0, item 8 in LITELLM_PRICING_PLAN.md).
+4. Run this script and paste the DEFAULT_PRICING block into lambda/proxy/pricing.py, then
+   reformat (the generated dicts are single-line; ruff expands them to the file style):
+       python3 scripts/gen_pricing.py > /tmp/pricing_block.py   # paste, then:
+       ruff format lambda/proxy/pricing.py
+5. If new model IDs appear, refresh the coverage snapshot so the D9 gate tracks them: set
+   scripts/vendor/supported_model_ids.txt to the sorted DEFAULT_PRICING keys (the model IDs
+   in the generated block).
 
 litellm is MIT licensed. See scripts/vendor/litellm_model_prices.json for attribution.
 """
