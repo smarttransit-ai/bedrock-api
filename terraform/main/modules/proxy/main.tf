@@ -274,12 +274,16 @@ resource "aws_iam_role_policy" "lambda" {
       },
       {
         # Live pricing catalog object: read on the hot path, written by the admin
-        # refresh endpoint. Object-level only (load uses GetObject, not HeadObject,
-        # so no s3:ListBucket is needed).
-        Sid      = "PricingCatalogS3"
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject"]
-        Resource = ["${aws_s3_bucket.pricing.arn}/*"]
+        # refresh endpoint. ListBucket on the bucket is required so that GetObject
+        # on a MISSING key returns NoSuchKey (404) — without it S3 returns
+        # AccessDenied (403) and the "absent → use DEFAULT_PRICING" path can't fire.
+        Sid    = "PricingCatalogS3"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject", "s3:ListBucket"]
+        Resource = [
+          aws_s3_bucket.pricing.arn,
+          "${aws_s3_bucket.pricing.arn}/*",
+        ]
       },
     ]
   })

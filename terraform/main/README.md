@@ -173,7 +173,7 @@ The proxy Lambda's execution role is least-privilege:
 | `rate_limit` table | `dynamodb:UpdateItem` |
 | Bedrock | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` on `*` |
 | Lambda log group | `logs:CreateLogStream`, `logs:PutLogEvents` |
-| pricing bucket (`${name_prefix}-pricing-<account>`) | `s3:GetObject`, `s3:PutObject` on `/*` |
+| pricing bucket (`${name_prefix}-pricing-<account>`) | `s3:GetObject`, `s3:PutObject` on `/*`; `s3:ListBucket` on the bucket (so a missing object reads as NoSuchKey, not AccessDenied) |
 
 Bedrock IAM is intentionally permissive (`Resource = ["*"]`). The model allowlist is enforced inside the Lambda — first by per-token `allowed_models`, then by the optional system-wide `ALLOWED_MODELS_DEFAULT` env var. Per-token `--budget` caps the cost blast radius of any leaked token.
 
