@@ -73,6 +73,8 @@ module "proxy" {
   throttling_rate_limit             = var.throttling_rate_limit
   throttling_burst_limit            = var.throttling_burst_limit
   apigw_cloudwatch_role_already_set = var.apigw_cloudwatch_role_already_set
+  litellm_source_url                = var.litellm_source_url
+  pricing_cache_ttl_s               = var.pricing_cache_ttl_s
   log_retention_days                = var.log_retention_days
   allowed_models_default            = var.default_models
 

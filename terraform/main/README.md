@@ -143,6 +143,8 @@ Before the first ccc apply, also decide `apigw_cloudwatch_role_already_set` (see
 | `throttling_rate_limit` | `20` | API Gateway stage steady-state rps |
 | `throttling_burst_limit` | `40` | API Gateway stage burst rps |
 | `apigw_cloudwatch_role_already_set` | `false` | Skip creating the account-level API Gateway CloudWatch role if already configured. `aws_api_gateway_account` is account-global. Check: `aws apigateway get-account`. |
+| `litellm_source_url` | litellm raw URL | Upstream price map the admin `POST /admin/pricing/refresh` endpoint pulls from. |
+| `pricing_cache_ttl_s` | `60` | Per-instance TTL (seconds) for the live pricing catalog read from S3. |
 
 ---
 
@@ -152,6 +154,7 @@ Before the first ccc apply, also decide `apigw_cloudwatch_role_already_set` (see
 |---|---|
 | `api_url` | REST API invoke URL (REGIONAL, stage v1) |
 | `ecr_repository_url` | ECR repository URL |
+| `pricing_bucket` | S3 bucket holding the live pricing catalog |
 | `lambda_function_name` | Proxy Lambda function name |
 | `tokens_table` | DynamoDB tokens table name |
 | `usage_table` | DynamoDB usage table name |
@@ -170,6 +173,7 @@ The proxy Lambda's execution role is least-privilege:
 | `rate_limit` table | `dynamodb:UpdateItem` |
 | Bedrock | `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream` on `*` |
 | Lambda log group | `logs:CreateLogStream`, `logs:PutLogEvents` |
+| pricing bucket (`${name_prefix}-pricing-<account>`) | `s3:GetObject`, `s3:PutObject` on `/*` |
 
 Bedrock IAM is intentionally permissive (`Resource = ["*"]`). The model allowlist is enforced inside the Lambda — first by per-token `allowed_models`, then by the optional system-wide `ALLOWED_MODELS_DEFAULT` env var. Per-token `--budget` caps the cost blast radius of any leaked token.
 

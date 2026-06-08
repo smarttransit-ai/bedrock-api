@@ -11,6 +11,10 @@ The output (DEFAULT_PRICING block) must be manually copied into
 lambda/proxy/pricing.py, replacing the existing block between the top
 comment and the _FALLBACK_BY_MODE definition.
 
+The litellm → catalog transform itself lives in lambda/proxy/pricing_catalog.py
+(shared with the runtime refresh endpoint); this script is the offline driver
+(load vendor file → build → coverage gate → print).
+
 --- Refresh procedure ---
 1. Fetch the upstream litellm JSON (BerriAI/litellm raw
    model_prices_and_context_window.json on main) into /tmp/litellm_full.json.
@@ -18,7 +22,8 @@ comment and the _FALLBACK_BY_MODE definition.
 2. Filter to routeable Bedrock entries (both input+output token cost fields present; no '/'
    in the key after stripping the bedrock/ prefix), strip the bedrock/ prefix from keys,
    keep only the pricing fields, sort keys, and prepend the _meta block; write the result to
-   scripts/vendor/litellm_model_prices.json.
+   scripts/vendor/litellm_model_prices.json. (pricing_catalog.filter_bedrock does the same
+   filter in Python at refresh time.)
 3. Update _meta.upstream_commit and _meta.fetched_date in the vendor file.
 4. Run this script and paste the DEFAULT_PRICING block into lambda/proxy/pricing.py, then
    reformat (the generated dicts are single-line; ruff expands them to the file style):
@@ -35,60 +40,12 @@ import json
 import pathlib
 import sys
 
+# The transform is shared with the runtime; it ships only under lambda/proxy/.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "lambda" / "proxy"))
+from pricing_catalog import ALLOWLISTED_REMOVALS, _build_entries  # noqa: E402
+
 VENDOR_JSON_PATH = pathlib.Path(__file__).parent / "vendor" / "litellm_model_prices.json"
 SNAPSHOT_PATH = pathlib.Path(__file__).parent / "vendor" / "supported_model_ids.txt"
-
-_BEDROCK_PROVIDERS = frozenset({"bedrock", "bedrock_converse"})
-
-# Prefixes derived outward (base → regional) in Pass 2a.
-_DERIVE_PREFIXES = ("us.", "global.")
-
-# All regional prefixes used to detect a region-scoped ID. Sources for derivation
-# must NOT start with any of these (a region-scoped ID is never a true base).
-# Note: us-gov.* is region-scoped and non-derivable — never prepend a prefix to it,
-# and never strip it to a "base" (there are no us-gov base IDs in the catalog).
-_REGIONAL_PREFIXES = ("us.", "global.", "eu.", "ap.", "us-gov.")
-
-# Prefix used to derive base IDs in Pass 2b (regional → base). Only us.* variants
-# are used as derivation sources for determinism (D5); us.* exists for every model
-# that needs a derived base (nova-premier, deepseek.r1, pixtral-large).
-_BASE_DERIVE_PREFIX = "us."
-
-# Provider prefixes that actually have AWS cross-region inference profiles
-# (i.e. real us./global. inference-profile IDs exist). Derived from the committed
-# snapshot supported_model_ids.txt: any provider appearing with a us./global./eu./ap.
-# regional prefix there. Constraining Pass 2a to these prevents manufacturing phantom
-# inference-profile IDs (e.g. us.ai21.*, global.cohere.*) that AWS does not expose.
-_CROSS_REGION_PROVIDERS = frozenset(
-    {"amazon", "anthropic", "deepseek", "meta", "mistral", "writer"}
-)
-
-
-def _provider_of(model_id: str) -> str:
-    """Return the provider prefix of a base (non-region-scoped) model ID.
-
-    The provider is the segment before the first '.' (e.g. "amazon.nova-lite-v1:0"
-    -> "amazon"). IDs with no '.' return the whole string.
-    """
-    return model_id.split(".", 1)[0]
-
-
-# IDs intentionally removed from DEFAULT_PRICING coverage.
-# Any ID in supported_model_ids.txt absent from generated entries AND absent from this set
-# causes a hard failure (sys.exit(1)). Add to this set only when removal is deliberate.
-ALLOWLISTED_REMOVALS: frozenset[str] = frozenset()
-
-
-def _per_token_to_micros_per_1k(v: float) -> int:
-    """USD per single token → integer µUSD per 1,000 tokens.
-
-    Formula: v * 1e6 (USD→µUSD) * 1e3 (per-token→per-1k) = v * 1e9.
-    Example: $15/1M = 15e-6/token → round(15e-6 * 1e9) = 15_000 µUSD/1k.
-
-    Uses Python's built-in round() which applies banker's rounding (half-even)
-    for half-integer ties. Sub-µUSD/1k ties are economically negligible.
-    """
-    return round(v * 1e9)
 
 
 def _load_vendor(path: pathlib.Path = VENDOR_JSON_PATH) -> dict:
@@ -96,99 +53,6 @@ def _load_vendor(path: pathlib.Path = VENDOR_JSON_PATH) -> dict:
     with path.open() as f:
         data = json.load(f)
     return {k: v for k, v in data.items() if k != "_meta"}
-
-
-def _to_on_demand_rates(entry: dict) -> dict[str, int]:
-    """Convert a litellm pricing entry to an on_demand rates dict.
-
-    Cache fallback (D3): an absent or null cache field defaults to the output rate.
-    entry.get(key) returns None for both absent keys and JSON null values; the
-    is-not-None guard handles both identically.
-    """
-    inp = _per_token_to_micros_per_1k(entry["input_cost_per_token"])
-    out = _per_token_to_micros_per_1k(entry["output_cost_per_token"])
-    cache_read_raw = entry.get("cache_read_input_token_cost")
-    cache_write_raw = entry.get("cache_creation_input_token_cost")
-    return {
-        "input_usd_micros_per_1k": inp,
-        "output_usd_micros_per_1k": out,
-        "cache_read_input_usd_micros_per_1k": _per_token_to_micros_per_1k(cache_read_raw)
-        if cache_read_raw is not None
-        else out,
-        "cache_write_input_usd_micros_per_1k": _per_token_to_micros_per_1k(cache_write_raw)
-        if cache_write_raw is not None
-        else out,
-    }
-
-
-def _build_entries(
-    vendor: dict,
-) -> tuple[dict[str, dict[str, dict[str, int]]], list[str]]:
-    """Build the pricing entries dict from the vendor map.
-
-    Returns (entries, derived_ids) where derived_ids lists any IDs that were
-    created by derivation (not present in vendor directly).
-
-    Pass 2a derives us./global. variants from base IDs when absent, but only for
-    providers with real AWS cross-region inference profiles (_CROSS_REGION_PROVIDERS).
-    Pass 2b derives base IDs from us.* variants when absent (D5 generalization).
-    Neither pass overwrites an explicit vendor entry.
-    """
-    entries: dict[str, dict[str, dict[str, int]]] = {}
-    derived_ids: list[str] = []
-
-    # Pass 1: emit all vendor entries.
-    # The vendor file filter already enforces the constraints below; the guards
-    # here are a belt-and-suspenders double-check against schema drift.
-    for model_id, entry in vendor.items():
-        if entry.get("litellm_provider") not in _BEDROCK_PROVIDERS:
-            continue
-        inp_cost = entry.get("input_cost_per_token")
-        out_cost = entry.get("output_cost_per_token")
-        if inp_cost is None or out_cost is None:
-            continue
-        # Drop entries with no billing value (both token costs 0) — e.g. rerank
-        # models at 0/0. Including them would underbill (route to fallback at $0).
-        # Token-priced embeddings (input > 0, output 0) ARE billable and kept.
-        if inp_cost <= 0 and out_cost <= 0:
-            continue
-        on_demand = _to_on_demand_rates(entry)
-        # D2: batch mirrors on_demand (litellm carries no Bedrock batch rates).
-        # NOTE: This over-counts batch requests for models with AWS batch discounts
-        # (e.g., Claude 3.x/4.x have a 50% batch discount). Accept this tradeoff.
-        entries[model_id] = {"on_demand": on_demand, "batch": dict(on_demand)}
-
-    # Pass 2a: for each true base ID, derive us./global. variants if absent (D5).
-    # A "base" ID is NOT region-scoped (no us./global./eu./ap./us-gov. prefix), and its
-    # provider must have real AWS cross-region inference profiles (_CROSS_REGION_PROVIDERS).
-    # This prevents manufacturing phantom IDs (e.g. us.ai21.*, global.cohere.*) and never
-    # prepends a prefix to an already-regional ID (incl. us-gov.*). dict() avoids aliasing.
-    base_ids = [
-        mid
-        for mid in list(entries)
-        if not any(mid.startswith(p) for p in _REGIONAL_PREFIXES)
-        and _provider_of(mid) in _CROSS_REGION_PROVIDERS
-    ]
-    for base_id in base_ids:
-        for prefix in _DERIVE_PREFIXES:
-            derived_id = prefix + base_id
-            if derived_id not in entries:
-                entries[derived_id] = dict(entries[base_id])
-                derived_ids.append(derived_id)
-
-    # Pass 2b: for each us.* variant, derive the base ID if absent (D5 generalization).
-    # Fixes cases where litellm has us.X but not X (e.g. amazon.nova-premier-v1:0,
-    # deepseek.r1-v1:0, mistral.pixtral-large-2502-v1:0). Only us.* is used as the
-    # derivation source (deterministic; us.* exists for every model needing a base —
-    # avoids insertion-order nondeterminism if eu.X / ap.X ever diverge from us.X).
-    for regional_id in list(entries):
-        if regional_id.startswith(_BASE_DERIVE_PREFIX):
-            base_id = regional_id[len(_BASE_DERIVE_PREFIX) :]
-            if base_id not in entries:
-                entries[base_id] = dict(entries[regional_id])
-                derived_ids.append(base_id)
-
-    return entries, derived_ids
 
 
 def main() -> None:

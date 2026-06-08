@@ -8,6 +8,11 @@ output "ecr_repository_url" {
   value       = module.proxy.ecr_repository_url
 }
 
+output "pricing_bucket" {
+  description = "S3 bucket holding the live pricing catalog."
+  value       = module.proxy.pricing_bucket
+}
+
 output "lambda_function_name" {
   description = "Name of the proxy Lambda function."
   value       = module.proxy.function_name

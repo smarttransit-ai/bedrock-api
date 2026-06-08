@@ -2,6 +2,10 @@
 import json
 import logging
 import os
+import time
+
+from deps import get_s3
+from pricing_store import load_live_catalog
 
 # Prices sourced from litellm community data (scripts/vendor/litellm_model_prices.json).
 # Refreshed via scripts/gen_pricing.py. See that file for the refresh procedure.
@@ -4119,8 +4123,17 @@ _RATE_KEYS = (
     "cache_read_input_usd_micros_per_1k",
     "cache_write_input_usd_micros_per_1k",
 )
+logger = logging.getLogger(__name__)
+
+# Live-catalog cache. A successful read or an authoritative absence is cached for
+# _PRICING_TTL; a transient/corrupt S3 condition falls back to DEFAULT_PRICING but is
+# cached only for _PRICING_RETRY_TTL so a subsequent successful refresh is picked up
+# promptly. _PRICING_CACHE_TTL holds the TTL the current cache entry was written with.
 _PRICING_CACHE: PricingMap | None = None
-_PRICING_CACHE_RAW: str | None = None
+_PRICING_CACHE_AT: float = float("-inf")
+_PRICING_CACHE_TTL: float = 0.0
+_PRICING_TTL: float = float(os.environ.get("PRICING_CACHE_TTL_S", "60"))
+_PRICING_RETRY_TTL: float = 5.0
 
 
 def _normalize_rates(rates: dict[str, int]) -> PricingRates:
@@ -4159,28 +4172,42 @@ def _normalize_pricing_map(raw_map: dict) -> PricingMap:
                 mode_map["batch"] = _normalize_rates(value.get("batch", {}))
             normalized[model_id] = mode_map
             continue
-        # Flat-format entry (bare rates, no on_demand/batch keys). This is not the
-        # documented PRICING_JSON shape, but tolerate it by mirroring on_demand into
-        # batch — consistent with the fallback policy (batch == on_demand) rather
-        # than inventing an arbitrary discount.
+        # Flat-format entry (bare rates, no on_demand/batch keys): tolerate it by
+        # mirroring on_demand into batch — consistent with the fallback policy
+        # (batch == on_demand) rather than inventing an arbitrary discount.
         rates = _normalize_rates(value)
         normalized[model_id] = {"on_demand": rates, "batch": rates}
     return normalized
 
 
 def _load_pricing() -> PricingMap:
-    global _PRICING_CACHE, _PRICING_CACHE_RAW
-    raw = os.environ.get("PRICING_JSON")
-    if raw:
-        if _PRICING_CACHE is not None and _PRICING_CACHE_RAW == raw:
-            return _PRICING_CACHE
-        _PRICING_CACHE = _normalize_pricing_map(json.loads(raw))
-        _PRICING_CACHE_RAW = raw
+    """Return the normalized pricing map: the live S3 catalog, else DEFAULT_PRICING.
+
+    Per-instance TTL cache (see the cache globals). The live catalog is the single
+    runtime source; DEFAULT_PRICING is the bootstrap/availability fallback.
+    """
+    global _PRICING_CACHE, _PRICING_CACHE_AT, _PRICING_CACHE_TTL
+    if _PRICING_CACHE is not None and time.monotonic() - _PRICING_CACHE_AT < _PRICING_CACHE_TTL:
         return _PRICING_CACHE
-    if _PRICING_CACHE is None or _PRICING_CACHE_RAW is not None:
-        _PRICING_CACHE = _normalize_pricing_map(DEFAULT_PRICING)
-        _PRICING_CACHE_RAW = None
+    try:
+        live = load_live_catalog(get_s3())
+        source = live if live is not None else DEFAULT_PRICING
+        ttl = _PRICING_TTL
+    except Exception as exc:
+        # Transient/corrupt S3 — serve baked-in rates, but re-check soon.
+        logger.warning(json.dumps({"event": "pricing_source_unavailable", "error": str(exc)}))
+        source = DEFAULT_PRICING
+        ttl = _PRICING_RETRY_TTL
+    _PRICING_CACHE = _normalize_pricing_map(source)
+    _PRICING_CACHE_AT = time.monotonic()
+    _PRICING_CACHE_TTL = ttl
     return _PRICING_CACHE
+
+
+def invalidate_cache() -> None:
+    """Force the next _load_pricing() to re-read the live catalog (post-refresh)."""
+    global _PRICING_CACHE_AT
+    _PRICING_CACHE_AT = float("-inf")
 
 
 def _resolve_rates(model_id: str, pricing_mode: str) -> tuple[PricingRates, bool, list[str]]:

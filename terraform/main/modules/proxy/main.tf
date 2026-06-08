@@ -1,4 +1,5 @@
 data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
 
 # ---------------------------------------------------------------------------
 # ECR repository for the proxy container image
@@ -9,6 +10,41 @@ resource "aws_ecr_repository" "proxy" {
 
   image_scanning_configuration {
     scan_on_push = true
+  }
+}
+
+# ---------------------------------------------------------------------------
+# S3 bucket for the live pricing catalog (the single runtime pricing source).
+# The Lambda reads pricing/current.json (TTL-cached) and the admin refresh
+# endpoint writes it. Versioned for cheap rollback of a bad refresh.
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket" "pricing" {
+  # S3 bucket names are globally unique; both deployments share name_prefix, so scope
+  # by account id (the state buckets use a random suffix for the same reason).
+  bucket = "${var.name_prefix}-pricing-${data.aws_caller_identity.current.account_id}"
+}
+
+resource "aws_s3_bucket_public_access_block" "pricing" {
+  bucket                  = aws_s3_bucket.pricing.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "pricing" {
+  bucket = aws_s3_bucket.pricing.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "pricing" {
+  bucket = aws_s3_bucket.pricing.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
   }
 }
 
@@ -236,6 +272,15 @@ resource "aws_iam_role_policy" "lambda" {
           "${aws_cloudwatch_log_group.lambda.arn}:*",
         ]
       },
+      {
+        # Live pricing catalog object: read on the hot path, written by the admin
+        # refresh endpoint. Object-level only (load uses GetObject, not HeadObject,
+        # so no s3:ListBucket is needed).
+        Sid      = "PricingCatalogS3"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = ["${aws_s3_bucket.pricing.arn}/*"]
+      },
     ]
   })
 }
@@ -264,6 +309,9 @@ resource "aws_lambda_function" "proxy" {
       RATE_LIMIT_TABLE             = var.rate_limit_table_name
       BEDROCK_REGION               = data.aws_region.current.region
       ALLOWED_MODELS_DEFAULT       = var.allowed_models_default
+      PRICING_BUCKET               = aws_s3_bucket.pricing.bucket
+      LITELLM_SOURCE_URL           = var.litellm_source_url
+      PRICING_CACHE_TTL_S          = tostring(var.pricing_cache_ttl_s)
       PORT                         = "8080"
       AWS_LWA_PORT                 = "8080"
       AWS_LWA_INVOKE_MODE          = "RESPONSE_STREAM"

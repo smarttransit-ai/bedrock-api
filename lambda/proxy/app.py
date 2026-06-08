@@ -12,7 +12,9 @@ Environment variables (required):
 Environment variables (optional):
   BEDROCK_REGION          — AWS region for bedrock-runtime (default: us-east-1)
   ALLOWED_MODELS_DEFAULT  — Comma-separated default model allowlist
-  PRICING_JSON            — JSON object overriding the built-in price map
+  PRICING_BUCKET          — S3 bucket holding the live pricing catalog
+  LITELLM_SOURCE_URL      — upstream litellm price map URL (refresh source)
+  PRICING_CACHE_TTL_S     — live-catalog cache TTL in seconds (default: 60)
 
 Pre-flight order (cheap rejects first):
   1. parse bearer token from Authorization header         → 401
@@ -53,7 +55,7 @@ from bedrock import (
     open_converse_stream,
     open_invoke_stream,
 )
-from deps import get_bedrock, get_tables
+from deps import get_bedrock, get_s3, get_tables
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from limits import (
@@ -65,7 +67,8 @@ from limits import (
     estimate_input_tokens,
     write_usage,
 )
-from pricing import compute_cost
+from pricing import compute_cost, invalidate_cache
+from pricing_refresh import refresh_pricing
 
 # Ensure INFO-level logs emit under uvicorn / Lambda Web Adapter (which does
 # not configure the root logger; without this, the root logger stays WARNING
@@ -246,6 +249,24 @@ async def run_preflight(
         start_ms=start_ms,
         usage_table=usage_table,
     )
+
+
+def require_admin(request: Request, tokens_table) -> str:
+    """Authenticate an admin bearer token (token row ``admin == True``); return token_id.
+
+    Mirrors the auth steps of run_preflight. Raises AuthError — 401 for an
+    invalid/revoked token, 403 when the (valid) token is not an admin. Gates
+    admin-only routes.
+    """
+    token_id, secret = parse_bearer_token_from_request(request)
+    token_row = tokens_table.get_item(Key={"token_id": token_id}).get("Item")
+    if not token_row or token_row.get("status") != "active":
+        raise AuthError("INVALID_TOKEN", "Invalid or revoked token")
+    if not verify_secret(secret, token_row["secret_hash"]):
+        raise AuthError("INVALID_TOKEN", "Invalid token secret")
+    if token_row.get("admin") is not True:
+        raise AuthError("FORBIDDEN", "admin token required", 403)
+    return token_id
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +491,42 @@ async def usage_endpoint(
             json.dumps({**log_ctx, "event": "unhandled_error", "latency_ms": latency_ms})
         )
         return _error_json(500, "INTERNAL_ERROR", "Internal server error")
+
+
+@app.post("/admin/pricing/refresh")
+async def admin_pricing_refresh(
+    request: Request,
+    tables=Depends(get_tables),
+    s3=Depends(get_s3),
+):
+    """POST /admin/pricing/refresh — re-pull pricing from litellm, validate, make it live.
+
+    Admin only. All-or-nothing: refresh_pricing only writes S3 if the rebuilt catalog
+    passes validation, so a failure leaves current pricing untouched.
+    """
+    tokens_table, _, _ = tables
+    try:
+        admin_token_id = require_admin(request, tokens_table)
+    except AuthError as exc:
+        # Direct error response — not a billed request, so no pricing_audit log.
+        return _error_json(exc.status, exc.code, exc.message)
+    try:
+        summary = refresh_pricing(s3)
+    except Exception as exc:
+        # Detail (URL, boto/validation message) goes to the log, not the wire.
+        logger.exception(json.dumps({"event": "pricing_refresh_failed", "error": str(exc)}))
+        return _error_json(502, "REFRESH_FAILED", "pricing refresh failed")
+    invalidate_cache()
+    logger.info(
+        json.dumps(
+            {
+                "event": "pricing_refresh",
+                "token_id": admin_token_id,
+                "entry_count": summary["entry_count"],
+            }
+        )
+    )
+    return JSONResponse(summary)
 
 
 # ---------------------------------------------------------------------------

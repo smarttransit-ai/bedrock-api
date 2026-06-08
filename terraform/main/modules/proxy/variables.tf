@@ -50,6 +50,18 @@ variable "allowed_models_default" {
   default     = ""
 }
 
+variable "litellm_source_url" {
+  description = "Upstream litellm price map URL the admin refresh endpoint pulls from."
+  type        = string
+  default     = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+}
+
+variable "pricing_cache_ttl_s" {
+  description = "Per-instance TTL (seconds) for the live pricing catalog read from S3."
+  type        = number
+  default     = 60
+}
+
 variable "throttling_rate_limit" {
   description = "Stage-level default steady-state requests per second. Sized for lab-scale interactive traffic; raise for batch jobs."
   type        = number
