@@ -57,6 +57,8 @@ graph TB
 
     Bedrock["AWS Bedrock Runtime<br/>/converse(-stream) → Converse(Stream)<br/>/invoke(-with-response-stream) → InvokeModel(WithResponseStream)"]
 
+    PricingS3["S3: bedrock-api-pricing-&lt;account&gt;<br/>pricing/current.json<br/>(live pricing catalog)"]
+
     subgraph CW["CloudWatch"]
         LogLambda["/aws/lambda/bedrock-api-proxy"]
         LogAPI["/aws/apigateway/bedrock-api-proxy"]
@@ -73,6 +75,7 @@ graph TB
     Handler -->|GetItem + UpdateItem| Usage
     Handler -->|UpdateItem| RateLimit
     Handler -->|routed by URL path| Bedrock
+    Handler -->|read live catalog (TTL); admin refresh writes| PricingS3
     Handler -->|JSON logs| LogLambda
     Stage -->|access logs| LogAPI
     LogLambda -->|metric filters| Alarm

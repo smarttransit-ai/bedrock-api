@@ -23,3 +23,8 @@ def get_bedrock():
     """Return a bedrock-runtime boto3 client."""
     region = os.environ.get("BEDROCK_REGION", "us-east-1")
     return boto3.client("bedrock-runtime", region_name=region)
+
+
+def get_s3():
+    """Return an S3 boto3 client (for the live pricing catalog object)."""
+    return boto3.client("s3")

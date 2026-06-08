@@ -24,6 +24,10 @@ os.environ.setdefault("TOKENS_TABLE", "test-tokens")
 os.environ.setdefault("USAGE_TABLE", "test-usage")
 os.environ.setdefault("RATE_LIMIT_TABLE", "test-rate-limit")
 os.environ.setdefault("BEDROCK_REGION", "us-east-1")
+os.environ.setdefault("PRICING_BUCKET", "test-pricing")
+os.environ.setdefault("PRICING_OBJECT_KEY", "pricing/current.json")
+os.environ.setdefault("LITELLM_SOURCE_URL", "https://example.invalid/litellm.json")
+os.environ.setdefault("PRICING_CACHE_TTL_S", "60")
 
 import boto3  # noqa: E402 (must come after env var setup)
 import pytest
@@ -54,6 +58,27 @@ def aws_mock():
     """Wrap each test in a fresh moto AWS environment."""
     with mock_aws():
         yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_pricing_cache():
+    """Reset the pricing module's live-catalog cache before each test (no cross-test bleed).
+
+    Deferred import (mirrors app_client) so pricing's module-level env reads happen
+    after this conftest's env setup.
+    """
+    import pricing
+
+    pricing.invalidate_cache()
+    yield
+
+
+@pytest.fixture()
+def pricing_bucket():
+    """Create the live-pricing S3 bucket inside the moto context; return its name."""
+    bucket = os.environ["PRICING_BUCKET"]
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=bucket)
+    return bucket
 
 
 @pytest.fixture()

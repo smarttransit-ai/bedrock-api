@@ -68,3 +68,15 @@ variable "apigw_cloudwatch_role_already_set" {
   type        = bool
   default     = false
 }
+
+variable "litellm_source_url" {
+  description = "Upstream litellm price map URL the admin pricing-refresh endpoint pulls from."
+  type        = string
+  default     = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+}
+
+variable "pricing_cache_ttl_s" {
+  description = "Per-instance TTL (seconds) for the live pricing catalog read from S3."
+  type        = number
+  default     = 60
+}

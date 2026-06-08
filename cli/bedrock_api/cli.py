@@ -106,6 +106,9 @@ def cmd_issue(args) -> None:
         if model_set:
             item["allowed_models"] = model_set
 
+    if args.admin:
+        item["admin"] = True
+
     try:
         tokens_table.put_item(
             Item=item,
@@ -137,6 +140,8 @@ def cmd_issue(args) -> None:
         print(f"models:     {', '.join(sorted(item['allowed_models']))}", file=sys.stderr)
     if args.note:
         print(f"note:       {args.note}", file=sys.stderr)
+    if args.admin:
+        print("admin:      true", file=sys.stderr)
 
 
 def cmd_revoke(args) -> None:
@@ -370,6 +375,11 @@ def build_parser():
     )
     p_issue.add_argument("--models", help="Comma-separated allowed model IDs")
     p_issue.add_argument("--note", help="Free-text label")
+    p_issue.add_argument(
+        "--admin",
+        action="store_true",
+        help="Grant admin rights (e.g. POST /admin/pricing/refresh)",
+    )
 
     # revoke
     p_revoke = sub.add_parser("revoke", help="Revoke a token")

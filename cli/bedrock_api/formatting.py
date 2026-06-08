@@ -32,6 +32,7 @@ def format_token_list(items: list[dict], file=None) -> None:
         ("TOKEN_ID", 17),
         ("OWNER", 16),
         ("STATUS", 8),
+        ("ADMIN", 5),
         ("CREATED_AT", 20),
         ("REQUESTS", 10),
         ("USD", 10),
@@ -44,6 +45,7 @@ def format_token_list(items: list[dict], file=None) -> None:
         token_id = _truncate(item.get("token_id", ""), 17)
         owner = _truncate(item.get("owner", ""), 16)
         status = _truncate(item.get("status", ""), 8)
+        admin = "yes" if item.get("admin") is True else ""
         created = _truncate(item.get("created_at", "")[:19], 20)  # trim sub-seconds
         requests = str(_int(item["requests"])) if "requests" in item else "0"
         usd = _usd(item["usd_micros"]) if "usd_micros" in item else "0.0000"
@@ -52,6 +54,7 @@ def format_token_list(items: list[dict], file=None) -> None:
                 token_id,
                 owner,
                 status,
+                admin.ljust(5),
                 created,
                 requests.ljust(10),
                 usd.ljust(10),
@@ -72,6 +75,7 @@ def format_token_show(token_row: dict, usage_row: dict | None, file=None) -> Non
         "token_id",
         "owner",
         "status",
+        "admin",
         "created_at",
         "revoked_at",
         "note",

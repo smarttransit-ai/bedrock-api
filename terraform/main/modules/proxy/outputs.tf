@@ -23,6 +23,11 @@ output "ecr_repository_url" {
   value       = aws_ecr_repository.proxy.repository_url
 }
 
+output "pricing_bucket" {
+  description = "S3 bucket holding the live pricing catalog (pricing/current.json)."
+  value       = aws_s3_bucket.pricing.bucket
+}
+
 output "role_arn" {
   description = "Lambda execution role ARN."
   value       = aws_iam_role.lambda.arn

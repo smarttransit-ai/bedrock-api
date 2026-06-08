@@ -18,3 +18,8 @@ throttling_burst_limit = 40
 # (aws_api_gateway_account is account-global). Check: aws apigateway get-account.
 # Leave false on a fresh account so the role + account config are created.
 apigw_cloudwatch_role_already_set = false
+
+# Live pricing catalog (S3-backed). The admin endpoint POST /admin/pricing/refresh
+# re-pulls from this URL; instances read the catalog from S3 with this TTL.
+litellm_source_url  = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+pricing_cache_ttl_s = 60
