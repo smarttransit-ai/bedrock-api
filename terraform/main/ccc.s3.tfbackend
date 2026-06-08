@@ -1,0 +1,6 @@
+# Backend state for the CCC deployment (account 066949051849, profile roged10_ccc).
+# Use with: terraform init -reconfigure -backend-config=ccc.s3.tfbackend
+# State bucket + lock table live in the ccc account (bootstrapped there).
+bucket         = "bedrock-api-tfstate-df07bde2"
+key            = "bedrock-api/terraform.tfstate"
+dynamodb_table = "bedrock-api-tfstate-lock"

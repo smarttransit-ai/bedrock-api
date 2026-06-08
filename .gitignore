@@ -44,3 +44,10 @@ node_modules/
 .env
 .env.local
 docs/clients-*.md
+
+# Orchestration scratch
+.orchestration_*.pid
+
+# Terraform plan output
+tfplan
+*.tfplan

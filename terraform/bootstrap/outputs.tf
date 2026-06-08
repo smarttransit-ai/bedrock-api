@@ -13,17 +13,11 @@ output "lock_table" {
   value       = aws_dynamodb_table.lock.name
 }
 
-output "backend_block" {
-  description = "Copy-pasteable HCL backend configuration for terraform/main/backend.tf. Pipe with: terraform output -raw backend_block > ../main/backend.tf"
+output "backend_config" {
+  description = "Per-deployment backend config for terraform/main (partial backend.tf). Write to a .tfbackend file, e.g.: terraform output -raw backend_config > ../main/ccc.s3.tfbackend, then: terraform init -reconfigure -backend-config=ccc.s3.tfbackend"
   value       = <<-EOT
-  terraform {
-    backend "s3" {
-      bucket         = "${aws_s3_bucket.state.bucket}"
-      key            = "${var.state_key}"
-      region         = "${aws_s3_bucket.state.region}"
-      dynamodb_table = "${aws_dynamodb_table.lock.name}"
-      encrypt        = true
-    }
-  }
+  bucket         = "${aws_s3_bucket.state.bucket}"
+  key            = "${var.state_key}"
+  dynamodb_table = "${aws_dynamodb_table.lock.name}"
   EOT
 }

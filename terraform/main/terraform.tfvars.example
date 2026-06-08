@@ -2,15 +2,24 @@ region             = "us-east-1"
 name_prefix        = "bedrock-api"
 log_retention_days = 14
 lambda_memory_mb   = 512
-lambda_timeout_s   = 60
+# Must be >= the 900s API Gateway integration timeout, or streaming responses
+# get killed mid-stream when the Lambda times out first.
+lambda_timeout_s   = 900
 default_models     = ""
 
-# Restrict to specific models (defaults shown — edit to limit further):
-# model_allowlist = [
-#   "us.anthropic.claude-sonnet-4-6-20250514-v1:0",
-#   "us.anthropic.claude-haiku-4-5-20250207-v1:0",
-# ]
+# Provisioned concurrency on the 'live' alias (eliminates cold-start 500s).
+provisioned_concurrency = 1
 
-# Custom domain (requires hosted_zone_id):
-# domain_name    = "api.example.com"
-# hosted_zone_id = "Z1234567890ABC"
+# API Gateway stage throttle (steady-state / burst requests per second).
+throttling_rate_limit  = 20
+throttling_burst_limit = 40
+
+# Set true ONLY if this account already has an API Gateway CloudWatch role
+# (aws_api_gateway_account is account-global). Check: aws apigateway get-account.
+# Leave false on a fresh account so the role + account config are created.
+apigw_cloudwatch_role_already_set = false
+
+# Live pricing catalog (S3-backed). The admin endpoint POST /admin/pricing/refresh
+# re-pulls from this URL; instances read the catalog from S3 with this TTL.
+litellm_source_url  = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+pricing_cache_ttl_s = 60

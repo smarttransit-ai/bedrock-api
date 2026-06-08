@@ -1,11 +1,10 @@
 """Shared fixtures and helpers for lambda/proxy tests.
 
 Module-level code runs before any test module is imported, ensuring env vars
-and sys.path are configured before handler.py reads them at import time.
+and sys.path are configured before app.py reads them at import time.
 """
 
 import hashlib
-import json
 import os
 import secrets
 import sys
@@ -20,11 +19,15 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 os.environ.setdefault("AWS_SECURITY_TOKEN", "testing")
 os.environ.setdefault("AWS_SESSION_TOKEN", "testing")
 
-# Table names — must be set before handler.py is imported (module-level reads).
+# Table names — must be set before app.py is imported (module-level reads).
 os.environ.setdefault("TOKENS_TABLE", "test-tokens")
 os.environ.setdefault("USAGE_TABLE", "test-usage")
 os.environ.setdefault("RATE_LIMIT_TABLE", "test-rate-limit")
 os.environ.setdefault("BEDROCK_REGION", "us-east-1")
+os.environ.setdefault("PRICING_BUCKET", "test-pricing")
+os.environ.setdefault("PRICING_OBJECT_KEY", "pricing/current.json")
+os.environ.setdefault("LITELLM_SOURCE_URL", "https://example.invalid/litellm.json")
+os.environ.setdefault("PRICING_CACHE_TTL_S", "60")
 
 import boto3  # noqa: E402 (must come after env var setup)
 import pytest
@@ -37,8 +40,12 @@ from moto import mock_aws
 TOKENS_TABLE = os.environ["TOKENS_TABLE"]
 USAGE_TABLE = os.environ["USAGE_TABLE"]
 RATE_LIMIT_TABLE = os.environ["RATE_LIMIT_TABLE"]
-DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
-ENCODED_MODEL = "us.anthropic.claude-sonnet-4-6"
+# A real catalog entry (priced, not fallback) that also contains a colon, so the
+# encoded form below exercises %3A path-decoding on every request that uses it.
+DEFAULT_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+# URL-encoded form: colons in path segments must be percent-encoded (%3A).
+# FastAPI/Starlette decodes %3A → ':' before it reaches the route handler.
+ENCODED_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1%3A0"
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +58,27 @@ def aws_mock():
     """Wrap each test in a fresh moto AWS environment."""
     with mock_aws():
         yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_pricing_cache():
+    """Reset the pricing module's live-catalog cache before each test (no cross-test bleed).
+
+    Deferred import (mirrors app_client) so pricing's module-level env reads happen
+    after this conftest's env setup.
+    """
+    import pricing
+
+    pricing.invalidate_cache()
+    yield
+
+
+@pytest.fixture()
+def pricing_bucket():
+    """Create the live-pricing S3 bucket inside the moto context; return its name."""
+    bucket = os.environ["PRICING_BUCKET"]
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=bucket)
+    return bucket
 
 
 @pytest.fixture()
@@ -135,6 +163,28 @@ def bedrock_stub():
     return client, stubber
 
 
+@pytest.fixture()
+def app_client(test_token, bedrock_stub):
+    """TestClient with dependency_overrides for get_tables and get_bedrock.
+
+    Imports get_tables/get_bedrock from deps (not app) to avoid dependency-override
+    identity fragility (amendment R4).
+
+    Yields (http_client, token_id, bearer_token, tables, stubber).
+    """
+    from app import app
+    from deps import get_bedrock, get_tables
+    from fastapi.testclient import TestClient
+
+    token_id, bearer_token, tables = test_token
+    client_bedrock, stubber = bedrock_stub
+    app.dependency_overrides[get_tables] = lambda: tables
+    app.dependency_overrides[get_bedrock] = lambda: client_bedrock
+    with TestClient(app, raise_server_exceptions=False) as http_client:
+        yield http_client, token_id, bearer_token, tables, stubber
+    app.dependency_overrides.clear()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -149,28 +199,6 @@ def _make_token() -> tuple[str, str, str]:
     secret_hash = f"{salt.hex()}:{digest}"
     bearer_token = f"{token_id}.{secret}"
     return token_id, bearer_token, secret_hash
-
-
-def make_event(
-    path: str,
-    body: dict,
-    bearer_token: str,
-    method: str = "POST",
-) -> dict:
-    """Build a minimal API Gateway HTTP API v2 event."""
-    return {
-        "version": "2.0",
-        "routeKey": f"{method} {path}",
-        "rawPath": path,
-        "rawQueryString": "",
-        "headers": {
-            "authorization": f"Bearer {bearer_token}",
-            "content-type": "application/json",
-        },
-        "requestContext": {"http": {"method": method, "path": path, "protocol": "HTTP/1.1"}},
-        "body": json.dumps(body),
-        "isBase64Encoded": False,
-    }
 
 
 def converse_response(

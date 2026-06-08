@@ -1,0 +1,1445 @@
+{
+  "_meta": {
+    "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+    "upstream_commit": "1c741b91c0f174ccbb9243ebacb4dccc64773e51",
+    "fetched_date": "2026-06-05",
+    "license": "MIT — Copyright (c) 2023 BerriAI (https://github.com/BerriAI/litellm)",
+    "filter": "litellm_provider in {bedrock, bedrock_converse}; input_cost_per_token and output_cost_per_token both non-null; sample_spec excluded; bedrock/ prefix stripped from keys; keys containing / after strip excluded (non-routeable region/routing prefixes). Result = token-priced, routeable Bedrock model IDs incl. token-priced embeddings (input>0, output 0). NOTE: entries with BOTH token costs 0 (e.g. rerank) carry no billing value and are dropped by gen_pricing.py (Pass-1 guard); the documented jq additionally drops them at refresh time.",
+    "refresh": "See module docstring in scripts/gen_pricing.py"
+  },
+  "ai21.j2-mid-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.0000125,
+    "output_cost_per_token": 0.0000125,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "ai21.j2-ultra-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.0000188,
+    "output_cost_per_token": 0.0000188,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "ai21.jamba-1-5-large-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000002,
+    "output_cost_per_token": 0.000008,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "ai21.jamba-1-5-mini-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 2E-7,
+    "output_cost_per_token": 4E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "ai21.jamba-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 5E-7,
+    "output_cost_per_token": 7E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.nova-2-lite-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3E-7,
+    "output_cost_per_token": 0.0000025,
+    "cache_read_input_token_cost": 7.5E-8,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.nova-2-multimodal-embeddings-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1.35E-7,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.nova-2-pro-preview-20251202-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000021875,
+    "output_cost_per_token": 0.0000175,
+    "cache_read_input_token_cost": 5.46875E-7,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.nova-lite-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6E-8,
+    "output_cost_per_token": 2.4E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.nova-micro-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3.5E-8,
+    "output_cost_per_token": 1.4E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.nova-pro-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 8E-7,
+    "output_cost_per_token": 0.0000032,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.rerank-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.0,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.titan-embed-image-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 8E-7,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.titan-embed-text-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1E-7,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.titan-embed-text-v2:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 2E-7,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.titan-text-express-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.0000013,
+    "output_cost_per_token": 0.0000017,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.titan-text-lite-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 3E-7,
+    "output_cost_per_token": 4E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "amazon.titan-text-premier-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 5E-7,
+    "output_cost_per_token": 0.0000015,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "anthropic.claude-3-5-haiku-20241022-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 8E-7,
+    "output_cost_per_token": 0.000004,
+    "cache_read_input_token_cost": 8E-8,
+    "cache_creation_input_token_cost": 0.000001
+  },
+  "anthropic.claude-3-5-sonnet-20240620-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "anthropic.claude-3-5-sonnet-20241022-v2:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "anthropic.claude-3-7-sonnet-20240620-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.0000036,
+    "output_cost_per_token": 0.000018,
+    "cache_read_input_token_cost": 3.6E-7,
+    "cache_creation_input_token_cost": 0.0000045
+  },
+  "anthropic.claude-3-7-sonnet-20250219-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "anthropic.claude-3-haiku-20240307-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 2.5E-7,
+    "output_cost_per_token": 0.00000125,
+    "cache_read_input_token_cost": 2.5E-8,
+    "cache_creation_input_token_cost": 3.125E-7
+  },
+  "anthropic.claude-3-opus-20240229-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000015,
+    "output_cost_per_token": 0.000075,
+    "cache_read_input_token_cost": 0.0000015,
+    "cache_creation_input_token_cost": 0.00001875
+  },
+  "anthropic.claude-3-sonnet-20240229-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "anthropic.claude-haiku-4-5-20251001-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000001,
+    "output_cost_per_token": 0.000005,
+    "cache_read_input_token_cost": 1E-7,
+    "cache_creation_input_token_cost": 0.00000125
+  },
+  "anthropic.claude-haiku-4-5@20251001": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000001,
+    "output_cost_per_token": 0.000005,
+    "cache_read_input_token_cost": 1E-7,
+    "cache_creation_input_token_cost": 0.00000125
+  },
+  "anthropic.claude-instant-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 8E-7,
+    "output_cost_per_token": 0.0000024,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "anthropic.claude-mythos-preview": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "anthropic.claude-opus-4-1-20250805-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000015,
+    "output_cost_per_token": 0.000075,
+    "cache_read_input_token_cost": 0.0000015,
+    "cache_creation_input_token_cost": 0.00001875
+  },
+  "anthropic.claude-opus-4-20250514-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000015,
+    "output_cost_per_token": 0.000075,
+    "cache_read_input_token_cost": 0.0000015,
+    "cache_creation_input_token_cost": 0.00001875
+  },
+  "anthropic.claude-opus-4-5-20251101-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "cache_read_input_token_cost": 5E-7,
+    "cache_creation_input_token_cost": 0.00000625
+  },
+  "anthropic.claude-opus-4-6-v1": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "cache_read_input_token_cost": 5E-7,
+    "cache_creation_input_token_cost": 0.00000625
+  },
+  "anthropic.claude-opus-4-7": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "cache_read_input_token_cost": 5E-7,
+    "cache_creation_input_token_cost": 0.00000625
+  },
+  "anthropic.claude-opus-4-8": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "cache_read_input_token_cost": 5E-7,
+    "cache_creation_input_token_cost": 0.00000625
+  },
+  "anthropic.claude-sonnet-4-20250514-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "anthropic.claude-sonnet-4-5-20250929-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "anthropic.claude-sonnet-4-6": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "anthropic.claude-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000008,
+    "output_cost_per_token": 0.000024,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "anthropic.claude-v2:1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000008,
+    "output_cost_per_token": 0.000024,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "apac.amazon.nova-2-lite-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3.3E-7,
+    "output_cost_per_token": 0.00000275,
+    "cache_read_input_token_cost": 8.25E-8,
+    "cache_creation_input_token_cost": null
+  },
+  "apac.amazon.nova-2-pro-preview-20251202-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000021875,
+    "output_cost_per_token": 0.0000175,
+    "cache_read_input_token_cost": 5.46875E-7,
+    "cache_creation_input_token_cost": null
+  },
+  "apac.amazon.nova-lite-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6.3E-8,
+    "output_cost_per_token": 2.52E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "apac.amazon.nova-micro-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3.7E-8,
+    "output_cost_per_token": 1.48E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "apac.amazon.nova-pro-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 8.4E-7,
+    "output_cost_per_token": 0.00000336,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "apac.anthropic.claude-3-5-sonnet-20240620-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "apac.anthropic.claude-3-5-sonnet-20241022-v2:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "apac.anthropic.claude-3-haiku-20240307-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 2.5E-7,
+    "output_cost_per_token": 0.00000125,
+    "cache_read_input_token_cost": 2.5E-8,
+    "cache_creation_input_token_cost": 3.125E-7
+  },
+  "apac.anthropic.claude-3-sonnet-20240229-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "apac.anthropic.claude-haiku-4-5-20251001-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000011,
+    "output_cost_per_token": 0.0000055,
+    "cache_read_input_token_cost": 1.1E-7,
+    "cache_creation_input_token_cost": 0.000001375
+  },
+  "apac.anthropic.claude-sonnet-4-20250514-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "au.anthropic.claude-haiku-4-5-20251001-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000011,
+    "output_cost_per_token": 0.0000055,
+    "cache_read_input_token_cost": 1.1E-7,
+    "cache_creation_input_token_cost": 0.000001375
+  },
+  "au.anthropic.claude-opus-4-6-v1": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "au.anthropic.claude-opus-4-7": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "au.anthropic.claude-opus-4-8": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "au.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000033,
+    "output_cost_per_token": 0.0000165,
+    "cache_read_input_token_cost": 3.3E-7,
+    "cache_creation_input_token_cost": 0.000004125
+  },
+  "au.anthropic.claude-sonnet-4-6": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000033,
+    "output_cost_per_token": 0.0000165,
+    "cache_read_input_token_cost": 3.3E-7,
+    "cache_creation_input_token_cost": 0.000004125
+  },
+  "claude-sonnet-4-5-20250929-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "cohere.command-light-text-v14": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 3E-7,
+    "output_cost_per_token": 6E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "cohere.command-r-plus-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "cohere.command-r-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 5E-7,
+    "output_cost_per_token": 0.0000015,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "cohere.command-text-v14": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.0000015,
+    "output_cost_per_token": 0.000002,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "cohere.embed-english-v3": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1E-7,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "cohere.embed-multilingual-v3": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1E-7,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "cohere.embed-v4:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1.2E-7,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "cohere.rerank-v3-5:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.0,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "deepseek.v3-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 5.8E-7,
+    "output_cost_per_token": 0.00000168,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "deepseek.v3.2": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6.2E-7,
+    "output_cost_per_token": 0.00000185,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.amazon.nova-2-lite-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3.3E-7,
+    "output_cost_per_token": 0.00000275,
+    "cache_read_input_token_cost": 8.25E-8,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.amazon.nova-2-pro-preview-20251202-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000021875,
+    "output_cost_per_token": 0.0000175,
+    "cache_read_input_token_cost": 5.46875E-7,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.amazon.nova-lite-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 7.8E-8,
+    "output_cost_per_token": 3.12E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.amazon.nova-micro-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 4.6E-8,
+    "output_cost_per_token": 1.84E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.amazon.nova-pro-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.00000105,
+    "output_cost_per_token": 0.0000042,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.anthropic.claude-3-5-haiku-20241022-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 2.5E-7,
+    "output_cost_per_token": 0.00000125,
+    "cache_read_input_token_cost": 2.5E-8,
+    "cache_creation_input_token_cost": 3.125E-7
+  },
+  "eu.anthropic.claude-3-5-sonnet-20240620-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "eu.anthropic.claude-3-5-sonnet-20241022-v2:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "eu.anthropic.claude-3-7-sonnet-20250219-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "eu.anthropic.claude-3-haiku-20240307-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 2.5E-7,
+    "output_cost_per_token": 0.00000125,
+    "cache_read_input_token_cost": 2.5E-8,
+    "cache_creation_input_token_cost": 3.125E-7
+  },
+  "eu.anthropic.claude-3-opus-20240229-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000015,
+    "output_cost_per_token": 0.000075,
+    "cache_read_input_token_cost": 0.0000015,
+    "cache_creation_input_token_cost": 0.00001875
+  },
+  "eu.anthropic.claude-3-sonnet-20240229-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "eu.anthropic.claude-haiku-4-5-20251001-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000011,
+    "output_cost_per_token": 0.0000055,
+    "cache_read_input_token_cost": 1.1E-7,
+    "cache_creation_input_token_cost": 0.000001375
+  },
+  "eu.anthropic.claude-opus-4-1-20250805-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000015,
+    "output_cost_per_token": 0.000075,
+    "cache_read_input_token_cost": 0.0000015,
+    "cache_creation_input_token_cost": 0.00001875
+  },
+  "eu.anthropic.claude-opus-4-20250514-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000015,
+    "output_cost_per_token": 0.000075,
+    "cache_read_input_token_cost": 0.0000015,
+    "cache_creation_input_token_cost": 0.00001875
+  },
+  "eu.anthropic.claude-opus-4-5-20251101-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "cache_read_input_token_cost": 5E-7,
+    "cache_creation_input_token_cost": 0.00000625
+  },
+  "eu.anthropic.claude-opus-4-6-v1": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "eu.anthropic.claude-opus-4-7": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "eu.anthropic.claude-opus-4-8": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "eu.anthropic.claude-sonnet-4-20250514-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "eu.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000033,
+    "output_cost_per_token": 0.0000165,
+    "cache_read_input_token_cost": 3.3E-7,
+    "cache_creation_input_token_cost": 0.000004125
+  },
+  "eu.anthropic.claude-sonnet-4-6": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000033,
+    "output_cost_per_token": 0.0000165,
+    "cache_read_input_token_cost": 3.3E-7,
+    "cache_creation_input_token_cost": 0.000004125
+  },
+  "eu.deepseek.v3.2": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 7.4E-7,
+    "output_cost_per_token": 0.00000222,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.meta.llama3-2-1b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1.3E-7,
+    "output_cost_per_token": 1.3E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.meta.llama3-2-3b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1.9E-7,
+    "output_cost_per_token": 1.9E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.mistral.pixtral-large-2502-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000002,
+    "output_cost_per_token": 0.000006,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "eu.twelvelabs.marengo-embed-2-7-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.00007,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "global.amazon.nova-2-lite-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3E-7,
+    "output_cost_per_token": 0.0000025,
+    "cache_read_input_token_cost": 7.5E-8,
+    "cache_creation_input_token_cost": null
+  },
+  "global.anthropic.claude-haiku-4-5-20251001-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000001,
+    "output_cost_per_token": 0.000005,
+    "cache_read_input_token_cost": 1E-7,
+    "cache_creation_input_token_cost": 0.00000125
+  },
+  "global.anthropic.claude-opus-4-5-20251101-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "cache_read_input_token_cost": 5E-7,
+    "cache_creation_input_token_cost": 0.00000625
+  },
+  "global.anthropic.claude-opus-4-6-v1": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "cache_read_input_token_cost": 5E-7,
+    "cache_creation_input_token_cost": 0.00000625
+  },
+  "global.anthropic.claude-opus-4-7": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "cache_read_input_token_cost": 5E-7,
+    "cache_creation_input_token_cost": 0.00000625
+  },
+  "global.anthropic.claude-opus-4-8": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "cache_read_input_token_cost": 5E-7,
+    "cache_creation_input_token_cost": 0.00000625
+  },
+  "global.anthropic.claude-sonnet-4-20250514-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "global.anthropic.claude-sonnet-4-6": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "google.gemma-3-12b-it": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 9E-8,
+    "output_cost_per_token": 2.9E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "google.gemma-3-27b-it": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 2.3E-7,
+    "output_cost_per_token": 3.8E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "google.gemma-3-4b-it": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 4E-8,
+    "output_cost_per_token": 8E-8,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "jp.anthropic.claude-haiku-4-5-20251001-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000011,
+    "output_cost_per_token": 0.0000055,
+    "cache_read_input_token_cost": 1.1E-7,
+    "cache_creation_input_token_cost": 0.000001375
+  },
+  "jp.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000033,
+    "output_cost_per_token": 0.0000165,
+    "cache_read_input_token_cost": 3.3E-7,
+    "cache_creation_input_token_cost": 0.000004125
+  },
+  "jp.anthropic.claude-sonnet-4-6": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000033,
+    "output_cost_per_token": 0.0000165,
+    "cache_read_input_token_cost": 3.3E-7,
+    "cache_creation_input_token_cost": 0.000004125
+  },
+  "meta.llama2-13b-chat-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 7.5E-7,
+    "output_cost_per_token": 0.000001,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama2-70b-chat-v1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.00000195,
+    "output_cost_per_token": 0.00000256,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-1-405b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.00000532,
+    "output_cost_per_token": 0.000016,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-1-70b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 9.9E-7,
+    "output_cost_per_token": 9.9E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-1-8b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 2.2E-7,
+    "output_cost_per_token": 2.2E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-2-11b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 3.5E-7,
+    "output_cost_per_token": 3.5E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-2-1b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1E-7,
+    "output_cost_per_token": 1E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-2-3b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 1.5E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-2-90b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000002,
+    "output_cost_per_token": 0.000002,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-3-70b-instruct-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 7.2E-7,
+    "output_cost_per_token": 7.2E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-70b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.00000265,
+    "output_cost_per_token": 0.0000035,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama3-8b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 3E-7,
+    "output_cost_per_token": 6E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama4-maverick-17b-instruct-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 2.4E-7,
+    "output_cost_per_token": 9.7E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "meta.llama4-scout-17b-instruct-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1.7E-7,
+    "output_cost_per_token": 6.6E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "minimax.minimax-m2": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3E-7,
+    "output_cost_per_token": 0.0000012,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "minimax.minimax-m2.1": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3E-7,
+    "output_cost_per_token": 0.0000012,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "minimax.minimax-m2.5": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3E-7,
+    "output_cost_per_token": 0.0000012,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.devstral-2-123b": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 4E-7,
+    "output_cost_per_token": 0.000002,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.magistral-small-2509": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 5E-7,
+    "output_cost_per_token": 0.0000015,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.ministral-3-14b-instruct": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 2E-7,
+    "output_cost_per_token": 2E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.ministral-3-3b-instruct": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1E-7,
+    "output_cost_per_token": 1E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.ministral-3-8b-instruct": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 1.5E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.mistral-7b-instruct-v0:2": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 2E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.mistral-large-2402-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000008,
+    "output_cost_per_token": 0.000024,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.mistral-large-2407-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000009,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.mistral-large-3-675b-instruct": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 5E-7,
+    "output_cost_per_token": 0.0000015,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.mistral-small-2402-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000001,
+    "output_cost_per_token": 0.000003,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.mixtral-8x7b-instruct-v0:1": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 4.5E-7,
+    "output_cost_per_token": 7E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.voxtral-mini-3b-2507": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 4E-8,
+    "output_cost_per_token": 4E-8,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "mistral.voxtral-small-24b-2507": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1E-7,
+    "output_cost_per_token": 3E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "moonshot.kimi-k2-thinking": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6E-7,
+    "output_cost_per_token": 0.0000025,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "moonshotai.kimi-k2-thinking": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 7.3E-7,
+    "output_cost_per_token": 0.00000303,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "moonshotai.kimi-k2.5": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6E-7,
+    "output_cost_per_token": 0.000003,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "nvidia.nemotron-nano-12b-v2": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 2E-7,
+    "output_cost_per_token": 6E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "nvidia.nemotron-nano-3-30b": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6E-8,
+    "output_cost_per_token": 2.4E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "nvidia.nemotron-nano-9b-v2": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6E-8,
+    "output_cost_per_token": 2.3E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "nvidia.nemotron-super-3-120b": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 6.5E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "openai.gpt-oss-120b-1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 6E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "openai.gpt-oss-20b-1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 7E-8,
+    "output_cost_per_token": 3E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "openai.gpt-oss-safeguard-120b": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 6E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "openai.gpt-oss-safeguard-20b": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 7E-8,
+    "output_cost_per_token": 2E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "qwen.qwen3-235b-a22b-2507-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 2.2E-7,
+    "output_cost_per_token": 8.8E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "qwen.qwen3-32b-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 6E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "qwen.qwen3-coder-30b-a3b-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 6E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "qwen.qwen3-coder-480b-a35b-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 2.2E-7,
+    "output_cost_per_token": 0.0000018,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "qwen.qwen3-coder-next": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 5E-7,
+    "output_cost_per_token": 0.0000012,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "qwen.qwen3-next-80b-a3b": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 0.0000012,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "qwen.qwen3-vl-235b-a22b": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 5.3E-7,
+    "output_cost_per_token": 0.00000266,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "twelvelabs.marengo-embed-2-7-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.00007,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000033,
+    "output_cost_per_token": 0.0000165,
+    "cache_read_input_token_cost": 3.3E-7,
+    "cache_creation_input_token_cost": 0.000004125
+  },
+  "us.amazon.nova-2-lite-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3.3E-7,
+    "output_cost_per_token": 0.00000275,
+    "cache_read_input_token_cost": 8.25E-8,
+    "cache_creation_input_token_cost": null
+  },
+  "us.amazon.nova-2-pro-preview-20251202-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000021875,
+    "output_cost_per_token": 0.0000175,
+    "cache_read_input_token_cost": 5.46875E-7,
+    "cache_creation_input_token_cost": null
+  },
+  "us.amazon.nova-lite-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6E-8,
+    "output_cost_per_token": 2.4E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.amazon.nova-micro-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 3.5E-8,
+    "output_cost_per_token": 1.4E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.amazon.nova-premier-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000025,
+    "output_cost_per_token": 0.0000125,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.amazon.nova-pro-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 8E-7,
+    "output_cost_per_token": 0.0000032,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.anthropic.claude-3-5-haiku-20241022-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 8E-7,
+    "output_cost_per_token": 0.000004,
+    "cache_read_input_token_cost": 8E-8,
+    "cache_creation_input_token_cost": 0.000001
+  },
+  "us.anthropic.claude-3-5-sonnet-20240620-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "us.anthropic.claude-3-5-sonnet-20241022-v2:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "us.anthropic.claude-3-7-sonnet-20250219-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "us.anthropic.claude-3-haiku-20240307-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 2.5E-7,
+    "output_cost_per_token": 0.00000125,
+    "cache_read_input_token_cost": 2.5E-8,
+    "cache_creation_input_token_cost": 3.125E-7
+  },
+  "us.anthropic.claude-3-opus-20240229-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000015,
+    "output_cost_per_token": 0.000075,
+    "cache_read_input_token_cost": 0.0000015,
+    "cache_creation_input_token_cost": 0.00001875
+  },
+  "us.anthropic.claude-3-sonnet-20240229-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000011,
+    "output_cost_per_token": 0.0000055,
+    "cache_read_input_token_cost": 1.1E-7,
+    "cache_creation_input_token_cost": 0.000001375
+  },
+  "us.anthropic.claude-opus-4-1-20250805-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000015,
+    "output_cost_per_token": 0.000075,
+    "cache_read_input_token_cost": 0.0000015,
+    "cache_creation_input_token_cost": 0.00001875
+  },
+  "us.anthropic.claude-opus-4-20250514-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000015,
+    "output_cost_per_token": 0.000075,
+    "cache_read_input_token_cost": 0.0000015,
+    "cache_creation_input_token_cost": 0.00001875
+  },
+  "us.anthropic.claude-opus-4-5-20251101-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "us.anthropic.claude-opus-4-6-v1": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "us.anthropic.claude-opus-4-7": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "us.anthropic.claude-opus-4-8": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000055,
+    "output_cost_per_token": 0.0000275,
+    "cache_read_input_token_cost": 5.5E-7,
+    "cache_creation_input_token_cost": 0.000006875
+  },
+  "us.anthropic.claude-sonnet-4-20250514-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000003,
+    "output_cost_per_token": 0.000015,
+    "cache_read_input_token_cost": 3E-7,
+    "cache_creation_input_token_cost": 0.00000375
+  },
+  "us.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000033,
+    "output_cost_per_token": 0.0000165,
+    "cache_read_input_token_cost": 3.3E-7,
+    "cache_creation_input_token_cost": 0.000004125
+  },
+  "us.anthropic.claude-sonnet-4-6": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000033,
+    "output_cost_per_token": 0.0000165,
+    "cache_read_input_token_cost": 3.3E-7,
+    "cache_creation_input_token_cost": 0.000004125
+  },
+  "us.deepseek.r1-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.00000135,
+    "output_cost_per_token": 0.0000054,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.deepseek.v3.2": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6.2E-7,
+    "output_cost_per_token": 0.00000185,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama3-1-405b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.00000532,
+    "output_cost_per_token": 0.000016,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama3-1-70b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 9.9E-7,
+    "output_cost_per_token": 9.9E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama3-1-8b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 2.2E-7,
+    "output_cost_per_token": 2.2E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama3-2-11b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 3.5E-7,
+    "output_cost_per_token": 3.5E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama3-2-1b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1E-7,
+    "output_cost_per_token": 1E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama3-2-3b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 1.5E-7,
+    "output_cost_per_token": 1.5E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama3-2-90b-instruct-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.000002,
+    "output_cost_per_token": 0.000002,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama3-3-70b-instruct-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 7.2E-7,
+    "output_cost_per_token": 7.2E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama4-maverick-17b-instruct-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 2.4E-7,
+    "output_cost_per_token": 9.7E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.meta.llama4-scout-17b-instruct-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 1.7E-7,
+    "output_cost_per_token": 6.6E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.mistral.pixtral-large-2502-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000002,
+    "output_cost_per_token": 0.000006,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.twelvelabs.marengo-embed-2-7-v1:0": {
+    "litellm_provider": "bedrock",
+    "input_cost_per_token": 0.00007,
+    "output_cost_per_token": 0.0,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.writer.palmyra-x4-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000025,
+    "output_cost_per_token": 0.00001,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "us.writer.palmyra-x5-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6E-7,
+    "output_cost_per_token": 0.000006,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "writer.palmyra-x4-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.0000025,
+    "output_cost_per_token": 0.00001,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "writer.palmyra-x5-v1:0": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6E-7,
+    "output_cost_per_token": 0.000006,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "zai.glm-4.7": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 6E-7,
+    "output_cost_per_token": 0.0000022,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "zai.glm-4.7-flash": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 7E-8,
+    "output_cost_per_token": 4E-7,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  },
+  "zai.glm-5": {
+    "litellm_provider": "bedrock_converse",
+    "input_cost_per_token": 0.000001,
+    "output_cost_per_token": 0.0000032,
+    "cache_read_input_token_cost": null,
+    "cache_creation_input_token_cost": null
+  }
+}

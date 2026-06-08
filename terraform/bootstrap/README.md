@@ -1,8 +1,10 @@
 # terraform/bootstrap
 
 Provisions the S3 bucket and DynamoDB table used as the Terraform remote backend
-for `terraform/main/`. This module is applied **once** with local state by an
-operator. After bootstrapping, the main stack stores its state in the created bucket.
+for `terraform/main/`. Apply it **once per deployment account** with local state
+(e.g. once as `roged10` for primary, once as `roged10_ccc` for ccc) — each account
+gets its own state bucket + lock table, which the main stack selects via a
+per-deployment `-backend-config` file.
 
 ## Purpose
 
@@ -30,13 +32,25 @@ terraform apply
 
 ## After apply
 
-Write the backend configuration for the main stack:
+`terraform/main/backend.tf` is a **partial** backend config; this module's
+output supplies the per-deployment `bucket`/`key`/`dynamodb_table`. Write them to
+that deployment's `.tfbackend` file (do **not** overwrite `backend.tf`):
 
 ```sh
-terraform output -raw backend_block > ../main/backend.tf
+# primary:
+terraform output -raw backend_config > ../main/primary.s3.tfbackend
+# ccc (run while bootstrapping the ccc account):
+terraform output -raw backend_config > ../main/ccc.s3.tfbackend
 ```
 
-Then commit `terraform/main/backend.tf` to version control.
+Then init the main stack against it:
+
+```sh
+cd ../main
+terraform init -reconfigure -backend-config=<deployment>.s3.tfbackend
+```
+
+Commit the `.tfbackend` file (it contains only bucket/table names, no secrets).
 
 ## Local state file
 

@@ -45,26 +45,29 @@ Note the printed outputs (bucket name, region, table name).
 
 ### 2. Wire the remote backend for the main stack
 
+`terraform/main/backend.tf` is a **partial** config; write this deployment's
+bucket/key/lock to a `.tfbackend` file (state is per deployment account):
+
 ```bash
-# From terraform/bootstrap — generates a ready-to-paste backend block
-terraform output -raw backend_block > ../main/backend.tf
+# From terraform/bootstrap (run once per deployment account):
+terraform output -raw backend_config > ../main/primary.s3.tfbackend
 ```
 
-Commit `terraform/main/backend.tf`.
+Commit the `.tfbackend` file (it holds only bucket/table names, no secrets).
 
 ### 3. Configure variables
 
 ```bash
 cd terraform/main
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars: set region, name_prefix, and optionally
-# domain_name + hosted_zone_id for a custom domain.
+# Edit terraform.tfvars: region, name_prefix, and the per-deployment knobs
+# (provisioned_concurrency, throttling_*, apigw_cloudwatch_role_already_set).
 ```
 
 ### 4. Apply the main stack
 
 ```bash
-terraform init
+terraform init -reconfigure -backend-config=primary.s3.tfbackend
 terraform plan
 terraform apply
 ```
@@ -134,6 +137,10 @@ bedrock-api issue alice \
 no monthly USD cap at all, you must remove the `limit_monthly_usd_micros`
 attribute manually with `aws dynamodb update-item ... REMOVE` (intentionally
 not exposed via CLI).
+
+Add `--admin` to grant the token admin rights (e.g. the pricing-refresh
+endpoint — see [Refresh pricing](#refresh-pricing)). Admin status shows in
+`bedrock-api show` and `list`.
 
 The **bearer token is printed to stdout exactly once and never shown again.**
 All other metadata (token_id, owner, limits) goes to stderr. To capture the
@@ -260,6 +267,62 @@ bedrock-api revoke bk_<token_id>
 
 Revocation is immediate. Any request using the revoked token returns 401.
 Revoking an already-revoked token is a no-op (exits 0).
+
+---
+
+## Refresh pricing
+
+Pricing is served from a live catalog in S3 (`<name_prefix>-pricing-<account>`,
+object `pricing/current.json`), cached per-instance for `pricing_cache_ttl_s`
+(default 60s). When the object is absent or unreachable, the proxy falls back to
+the rates baked into the image (`DEFAULT_PRICING`). To update prices on a running
+deployment — no redeploy — re-pull from litellm via the admin endpoint.
+
+**1. Mint an admin token** (a normal token plus admin rights):
+
+```bash
+bedrock-api issue ops --admin > admin-token.txt
+```
+
+**2. Call the refresh endpoint** with that token:
+
+```bash
+API_URL="$(cd terraform/main && terraform output -raw api_url)"
+curl -sS -X POST "$API_URL/admin/pricing/refresh" \
+  -H "Authorization: Bearer $(cat admin-token.txt)" | jq .
+```
+
+On success (HTTP 200) it returns a summary and the new catalog is live within one
+`pricing_cache_ttl_s` window across all instances:
+
+```json
+{
+  "entry_count": 291,
+  "fetched_at": "2026-06-08T20:00:00+00:00",
+  "anchors": {
+    "us.anthropic.claude-sonnet-4-6": {"input_usd_micros_per_1k": 3300, "output_usd_micros_per_1k": 16500},
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0": {"input_usd_micros_per_1k": 1100, "output_usd_micros_per_1k": 5500}
+  }
+}
+```
+
+**Check what's live** at any time (read-only):
+
+```bash
+curl -sS "$API_URL/admin/pricing" -H "Authorization: Bearer $(cat admin-token.txt)" | jq .
+# {"source":"live","meta":{"fetched_at":"…","source":"…","entry_count":291}}
+# or {"source":"default","meta":null}  ← no refresh yet; baked-in rates in use
+```
+
+It is **all-or-nothing and validated** — the refresh writes S3 only if the rebuilt
+catalog passes the gate (non-empty; not >20% smaller than the baked-in catalog;
+the in-use anchor models present with sane, in-band rates). If the pull fails or
+the gate rejects it, the endpoint returns **`502 REFRESH_FAILED`** and **current
+pricing is left untouched** (detail is in the `pricing_refresh_failed` log, not the
+response). A non-admin token gets **`403 FORBIDDEN`**.
+
+The upstream source is `var.litellm_source_url`. The pricing bucket is versioned,
+so a bad refresh can be rolled back to a prior object version in S3.
 
 ---
 

@@ -10,14 +10,13 @@ class AuthError(Exception):
         self.status = status
 
 
-def parse_bearer_token(event: dict) -> tuple[str, str]:
-    """Extract (token_id, secret) from the Authorization header.
+def parse_bearer_token_from_request(request) -> tuple[str, str]:
+    """Extract (token_id, secret) from the request's Authorization header.
 
-    API Gateway HTTP API v2 sends headers in lowercase.
-    Token format: bk_<32hex>.<64hex>
+    FastAPI/Starlette ``request.headers`` is a case-insensitive multidict, so a
+    single lookup suffices. Token format: bk_<32hex>.<64hex>
     """
-    headers = event.get("headers") or {}
-    auth = headers.get("authorization") or headers.get("Authorization") or ""
+    auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
         raise AuthError("INVALID_TOKEN", "Missing or malformed Authorization header")
     token = auth[7:].strip()

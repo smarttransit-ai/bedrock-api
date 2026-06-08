@@ -1,14 +1,15 @@
-"""Tests for the GET /usage self-service endpoint in lambda/proxy/handler.py."""
+"""Tests for the GET /usage self-service endpoint in lambda/proxy/app.py.
 
-import json
+Migrated from handler-based tests to FastAPI TestClient.
+"""
+
 import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import patch
 
+import pytest
 from botocore.exceptions import ClientError
-from conftest import make_event
-from handler import handler
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -19,8 +20,8 @@ def _current_period() -> str:
     return datetime.now(UTC).strftime("%Y-%m")
 
 
-def _usage_event(bearer_token: str) -> dict:
-    return make_event("/usage", {}, bearer_token, method="GET")
+def _auth_headers(bearer_token: str) -> dict:
+    return {"Authorization": f"Bearer {bearer_token}"}
 
 
 def _set_limits(tokens_table, token_id: str, **kwargs):
@@ -49,17 +50,35 @@ def _seed_usage(usage_table, token_id: str, **kwargs):
     usage_table.put_item(Item=item)
 
 
+@pytest.fixture()
+def usage_client(test_token):
+    """TestClient with dependency_overrides cleared at teardown.
+
+    GET /usage depends only on get_tables (no Bedrock), so it does not override
+    get_bedrock.
+    """
+    from app import app
+    from deps import get_tables
+    from fastapi.testclient import TestClient
+
+    token_id, bearer_token, tables = test_token
+    app.dependency_overrides[get_tables] = lambda: tables
+    http_client = TestClient(app, raise_server_exceptions=False)
+    yield http_client, token_id, bearer_token, tables
+    app.dependency_overrides.clear()
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
 
-def test_no_usage_no_limits(test_token):
-    token_id, bearer_token, tables = test_token
-    resp = handler(_usage_event(bearer_token), None, _tables=tables)
+def test_no_usage_no_limits(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
+    resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 200
-    body = json.loads(resp["body"])
+    assert resp.status_code == 200
+    body = resp.json()
     assert body["period"] == _current_period()
     assert body["usage"] == {
         "requests": 0,
@@ -79,8 +98,8 @@ def test_no_usage_no_limits(test_token):
     assert "remaining" not in body
 
 
-def test_with_usage_and_limits(test_token):
-    token_id, bearer_token, tables = test_token
+def test_with_usage_and_limits(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
     tokens_table, usage_table, _ = tables
 
     _set_limits(tokens_table, token_id, monthly_requests=500, monthly_usd_micros=5_000_000)
@@ -95,10 +114,10 @@ def test_with_usage_and_limits(test_token):
         usd_micros=312000,
     )
 
-    resp = handler(_usage_event(bearer_token), None, _tables=tables)
+    resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 200
-    body = json.loads(resp["body"])
+    assert resp.status_code == 200
+    body = resp.json()
     assert body["period"] == _current_period()
     assert body["usage"] == {
         "requests": 42,
@@ -114,38 +133,38 @@ def test_with_usage_and_limits(test_token):
     assert body["remaining"]["usd"] == 4.688
 
 
-def test_remaining_clamped_to_zero(test_token):
-    token_id, bearer_token, tables = test_token
+def test_remaining_clamped_to_zero(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
     tokens_table, usage_table, _ = tables
 
     _set_limits(tokens_table, token_id, monthly_requests=500)
     _seed_usage(usage_table, token_id, requests=600, usd_micros=0)
 
-    resp = handler(_usage_event(bearer_token), None, _tables=tables)
+    resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 200
-    body = json.loads(resp["body"])
+    assert resp.status_code == 200
+    body = resp.json()
     assert body["remaining"]["requests"] == 0
     assert "usd" not in body["remaining"]
 
 
-def test_only_one_monthly_limit(test_token):
-    token_id, bearer_token, tables = test_token
+def test_only_one_monthly_limit(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
     tokens_table, usage_table, _ = tables
 
     _set_limits(tokens_table, token_id, monthly_usd_micros=5_000_000)
     _seed_usage(usage_table, token_id, usd_micros=100_000)
 
-    resp = handler(_usage_event(bearer_token), None, _tables=tables)
+    resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 200
-    body = json.loads(resp["body"])
+    assert resp.status_code == 200
+    body = resp.json()
     assert "usd" in body["remaining"]
     assert "requests" not in body["remaining"]
 
 
-def test_wrong_period_row_ignored(test_token):
-    token_id, bearer_token, tables = test_token
+def test_wrong_period_row_ignored(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
     _, usage_table, _ = tables
 
     usage_table.put_item(
@@ -157,25 +176,24 @@ def test_wrong_period_row_ignored(test_token):
         }
     )
 
-    resp = handler(_usage_event(bearer_token), None, _tables=tables)
+    resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 200
-    body = json.loads(resp["body"])
+    assert resp.status_code == 200
+    body = resp.json()
     assert body["usage"]["requests"] == 0
     assert body["usage"]["usd"] == 0.0
 
 
-def test_invalid_token(test_token):
-    _, _, tables = test_token
-    event = make_event("/usage", {}, "Bearer invalid.token", method="GET")
-    resp = handler(event, None, _tables=tables)
+def test_invalid_token(usage_client):
+    http_client, _, _, _ = usage_client
+    resp = http_client.get("/usage", headers={"Authorization": "Bearer invalid.token"})
 
-    assert resp["statusCode"] == 401
-    assert json.loads(resp["body"])["error"]["code"] == "INVALID_TOKEN"
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "INVALID_TOKEN"
 
 
-def test_revoked_token(test_token):
-    token_id, bearer_token, tables = test_token
+def test_revoked_token(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
     tokens_table, _, _ = tables
 
     tokens_table.update_item(
@@ -185,22 +203,22 @@ def test_revoked_token(test_token):
         ExpressionAttributeValues={":r": "revoked"},
     )
 
-    resp = handler(_usage_event(bearer_token), None, _tables=tables)
+    resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 401
-    assert json.loads(resp["body"])["error"]["code"] == "INVALID_TOKEN"
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "INVALID_TOKEN"
 
 
-def test_usage_does_not_write_usage_row(test_token):
-    token_id, bearer_token, tables = test_token
+def test_usage_does_not_write_usage_row(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
     _, usage_table, _ = tables
 
     _seed_usage(usage_table, token_id, requests=5, usd_micros=1000)
 
-    resp = handler(_usage_event(bearer_token), None, _tables=tables)
+    resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 200
-    assert "period" in json.loads(resp["body"])
+    assert resp.status_code == 200
+    assert "period" in resp.json()
 
     row = usage_table.get_item(Key={"token_id": token_id, "period": _current_period()}).get(
         "Item", {}
@@ -209,8 +227,8 @@ def test_usage_does_not_write_usage_row(test_token):
     assert int(row["usd_micros"]) == 1000
 
 
-def test_usage_does_not_write_rate_limit(test_token):
-    token_id, bearer_token, tables = test_token
+def test_usage_does_not_write_rate_limit(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
     tokens_table, _, rate_limit_table = tables
 
     _set_limits(tokens_table, token_id, rps=1)
@@ -224,10 +242,10 @@ def test_usage_does_not_write_rate_limit(test_token):
         }
     )
 
-    resp = handler(_usage_event(bearer_token), None, _tables=tables)
+    resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 200
-    assert "period" in json.loads(resp["body"])
+    assert resp.status_code == 200
+    assert "period" in resp.json()
 
     row = rate_limit_table.get_item(Key={"token_id": token_id, "window_second": now_second}).get(
         "Item", {}
@@ -235,48 +253,41 @@ def test_usage_does_not_write_rate_limit(test_token):
     assert int(row["count"]) == 1
 
 
-def test_rps_zero_token_can_check_usage(test_token):
-    token_id, bearer_token, tables = test_token
+def test_rps_zero_token_can_check_usage(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
     tokens_table, _, _ = tables
 
     _set_limits(tokens_table, token_id, rps=0)
 
-    resp = handler(_usage_event(bearer_token), None, _tables=tables)
+    resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 200
-    assert "period" in json.loads(resp["body"])
-
-
-def test_post_usage_not_dispatched(test_token):
-    _, bearer_token, tables = test_token
-    event = make_event("/usage", {}, bearer_token, method="POST")
-    resp = handler(event, None, _tables=tables)
-
-    assert resp["statusCode"] == 400
-    assert json.loads(resp["body"])["error"]["code"] == "BAD_REQUEST"
+    assert resp.status_code == 200
+    assert "period" in resp.json()
 
 
-def test_get_model_path_not_dispatched(test_token):
-    """GET /model/somemodel/badroute — parse_route rejects unsupported suffix → 400.
+def test_post_usage_not_dispatched(usage_client):
+    """POST /usage → 405 Method Not Allowed (FastAPI behaviour change from handler's 400)."""
+    http_client, _, bearer_token, _ = usage_client
+    resp = http_client.post("/usage", headers=_auth_headers(bearer_token))
 
-    Only reachable via direct Lambda injection; no APIGW route exists for GET on model
-    paths. Defense-in-depth unit test.
-    """
-    _, bearer_token, tables = test_token
-    event = make_event("/model/somemodel/badroute", {}, bearer_token, method="GET")
-    resp = handler(event, None, _tables=tables)
-
-    assert resp["statusCode"] == 400
-    assert json.loads(resp["body"])["error"]["code"] == "BAD_REQUEST"
+    assert resp.status_code == 405
 
 
-def test_usage_getitem_failure_returns_500(test_token):
-    token_id, bearer_token, tables = test_token
+def test_get_model_path_not_dispatched(usage_client):
+    """GET /model/x/badroute → 404 (FastAPI returns 404 for unregistered paths)."""
+    http_client, _, bearer_token, _ = usage_client
+    resp = http_client.get("/model/somemodel/badroute", headers=_auth_headers(bearer_token))
+
+    assert resp.status_code == 404
+
+
+def test_usage_getitem_failure_returns_500(usage_client):
+    http_client, token_id, bearer_token, tables = usage_client
     _, usage_table, _ = tables
 
     error_response = {"Error": {"Code": "InternalServerError", "Message": "DynamoDB unavailable"}}
     with patch.object(usage_table, "get_item", side_effect=ClientError(error_response, "GetItem")):
-        resp = handler(_usage_event(bearer_token), None, _tables=tables)
+        resp = http_client.get("/usage", headers=_auth_headers(bearer_token))
 
-    assert resp["statusCode"] == 500
-    assert json.loads(resp["body"])["error"]["code"] == "INTERNAL_ERROR"
+    assert resp.status_code == 500
+    assert resp.json()["error"]["code"] == "INTERNAL_ERROR"

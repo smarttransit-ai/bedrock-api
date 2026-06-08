@@ -1,6 +1,16 @@
 output "api_url" {
-  description = "Public API endpoint URL (custom domain if set, otherwise the default APIGW endpoint)."
-  value       = module.api.api_url
+  description = "REST API invoke URL (REGIONAL, stage v1). Use this as the API base URL."
+  value       = module.proxy.api_url
+}
+
+output "ecr_repository_url" {
+  description = "ECR repository URL for the proxy container image."
+  value       = module.proxy.ecr_repository_url
+}
+
+output "pricing_bucket" {
+  description = "S3 bucket holding the live pricing catalog."
+  value       = module.proxy.pricing_bucket
 }
 
 output "lambda_function_name" {

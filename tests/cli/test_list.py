@@ -101,3 +101,19 @@ def test_list_empty_table(run_cli, tables):
     assert code == 0
     # Header should still print
     assert "TOKEN_ID" in stderr
+
+
+def test_list_shows_admin_indicator(run_cli, tables):
+    """Admin tokens show 'yes' under the ADMIN column."""
+    tokens_table, _ = tables
+    admin_id, _ = make_active_token(tokens_table, owner="ops")
+    tokens_table.update_item(
+        Key={"token_id": admin_id},
+        UpdateExpression="SET admin = :a",
+        ExpressionAttributeValues={":a": True},
+    )
+    make_active_token(tokens_table, owner="alice")
+    _, stderr, code = run_cli(["list"])
+    assert code == 0
+    assert "ADMIN" in stderr
+    assert "yes" in stderr

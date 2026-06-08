@@ -77,8 +77,20 @@ def test_issue_minimal(run_cli, tables):
         "limit_max_input_tokens",
         "limit_max_output_tokens",
         "allowed_models",
+        "admin",
     ]:
         assert attr not in item, f"Unexpected attribute {attr}"
+
+
+def test_issue_admin_flag(run_cli, tables):
+    """--admin sets admin=True on the row; default issue omits it."""
+    stdout, stderr, code = run_cli(["issue", "ops", "--admin"])
+    assert code == 0
+    token_id = stdout.strip().split(".")[0]
+    tokens_table, _ = tables
+    item = tokens_table.get_item(Key={"token_id": token_id})["Item"]
+    assert item["admin"] is True
+    assert "admin" in stderr
 
 
 def test_issue_empty_models_not_written(run_cli, tables):
