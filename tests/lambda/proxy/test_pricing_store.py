@@ -4,7 +4,12 @@ import os
 
 import boto3
 import pytest
-from pricing_store import PRICING_OBJECT_KEY, load_live_catalog, save_live_catalog
+from pricing_store import (
+    PRICING_OBJECT_KEY,
+    load_live_catalog,
+    load_live_meta,
+    save_live_catalog,
+)
 
 
 def _s3():
@@ -20,6 +25,16 @@ def test_save_then_load_round_trip(pricing_bucket):
 
 def test_load_absent_object_returns_none(pricing_bucket):
     assert load_live_catalog(_s3()) is None
+
+
+def test_load_meta_round_trip(pricing_bucket):
+    s3 = _s3()
+    save_live_catalog(s3, {"m": {"on_demand": {}}}, {"entry_count": 1, "fetched_at": "t"})
+    assert load_live_meta(s3) == {"entry_count": 1, "fetched_at": "t"}
+
+
+def test_load_meta_absent_returns_none(pricing_bucket):
+    assert load_live_meta(_s3()) is None
 
 
 def test_load_absent_bucket_returns_none():
