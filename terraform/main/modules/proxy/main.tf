@@ -257,6 +257,14 @@ resource "aws_iam_role_policy" "lambda" {
         # tokens with no allowlist can call any Bedrock model the operator
         # account has access to. Per-token --budget caps the blast radius.
         # bedrock:InvokeModelWithResponseStream is added for streaming routes.
+        #
+        # Covers BOTH upstreams: bedrock-runtime (Converse/InvokeModel) and
+        # bedrock-mantle (the OpenAI Responses endpoint, /openai/v1/responses), which is
+        # signed with SigV4 under this same `bedrock` service name. Resource = ["*"] already
+        # covers it — mantle does not expose geo/global inference profiles, so the
+        # arn:aws:bedrock:<region>::inference-profile/<model_id> pattern does not apply there.
+        # If mantle turns out to require its own action, add it here (deployment validates
+        # with a live call before rollout).
         Action = [
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream",

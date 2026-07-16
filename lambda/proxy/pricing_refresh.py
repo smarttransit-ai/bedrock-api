@@ -33,6 +33,11 @@ _MAX_BODY_BYTES = 10 * 1024 * 1024  # 10 MB cap — reject larger (fail closed)
 _REQUIRED_MODEL_IDS = (
     "us.anthropic.claude-sonnet-4-6",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    # bedrock-mantle anchor. Without it, an upstream regression that drops the
+    # bedrock_mantle family would pass validate_catalog (the 80%-shrink guard barely
+    # moves for 13 of 300+ entries), go live unpriced, and bill every Responses request
+    # at the Opus-tier fallback — a ~11x over-count, silent except for a log field.
+    "mantle/openai.gpt-5.6-luna",
 )
 
 

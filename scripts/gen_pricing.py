@@ -19,11 +19,27 @@ The litellm → catalog transform itself lives in lambda/proxy/pricing_catalog.p
 1. Fetch the upstream litellm JSON (BerriAI/litellm raw
    model_prices_and_context_window.json on main) into /tmp/litellm_full.json.
    The full source URL is in scripts/vendor/litellm_model_prices.json (_meta.source).
-2. Filter to routeable Bedrock entries (both input+output token cost fields present; no '/'
-   in the key after stripping the bedrock/ prefix), strip the bedrock/ prefix from keys,
-   keep only the pricing fields, sort keys, and prepend the _meta block; write the result to
-   scripts/vendor/litellm_model_prices.json. (pricing_catalog.filter_bedrock does the same
-   filter in Python at refresh time.)
+2. Filter to routeable entries and key them for the catalog. The simplest correct way is to
+   reuse the shipped transform rather than hand-rolling jq — it is the same function the
+   runtime refresh uses, so the snapshot cannot drift from live behaviour:
+
+       import json, sys
+       sys.path.insert(0, "lambda/proxy")
+       from pricing_catalog import filter_bedrock
+       raw = json.load(open("/tmp/litellm_full.json"))
+       KEEP = ("litellm_provider", "input_cost_per_token", "output_cost_per_token",
+               "cache_read_input_token_cost", "cache_creation_input_token_cost",
+               "output_cost_per_reasoning_token")
+       out = {k: {f: e[f] for f in KEEP if f in e} for k, e in filter_bedrock(raw).items()}
+       # then: sort keys, prepend the _meta block, write scripts/vendor/litellm_model_prices.json
+
+   filter_bedrock keeps litellm_provider in {bedrock, bedrock_converse, bedrock_mantle} with
+   both token costs non-null, strips the provider's key prefix (bedrock/ or bedrock_mantle/),
+   drops keys still holding a '/' afterward, and namespaces mantle keys under mantle/.
+   Retain output_cost_per_reasoning_token when present so _build_entries can warn that our
+   rates would underbill (no priced provider carries it today).
+   NOTE: mantle entries MUST be stored as mantle/<id>; prefixing them with bedrock/ instead
+   leaves a slash in the stripped key and the whole mantle family is silently dropped.
 3. Update _meta.upstream_commit and _meta.fetched_date in the vendor file.
 4. Run this script and paste the DEFAULT_PRICING block into lambda/proxy/pricing.py, then
    reformat (the generated dicts are single-line; ruff expands them to the file style):

@@ -298,3 +298,68 @@ def test_transient_s3_error_falls_back_and_short_retry(monkeypatch):
     )
     assert fallback_applied is False  # DEFAULT used on a transient (non-absent) S3 error
     assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
+
+
+def test_compute_cost_mantle_namespaced_model(pricing_bucket):
+    """mantle/openai.gpt-5.6-luna prices from the catalog, not the Opus-tier fallback."""
+    total, components, fallback_applied, fallback_dimensions, rates = compute_cost(
+        model_id="mantle/openai.gpt-5.6-luna",
+        pricing_mode="on_demand",
+        input_tokens=1000,
+        output_tokens=1000,
+        cache_read_input_tokens=0,
+        cache_write_input_tokens=0,
+    )
+    # litellm: $1.10/1M input, $6.60/1M output → 1_100 / 6_600 µUSD per 1k.
+    assert rates["input_usd_micros_per_1k"] == 1100
+    assert rates["output_usd_micros_per_1k"] == 6600
+    assert total == 7700
+    assert fallback_applied is False
+    assert fallback_dimensions == []
+    assert components["output_usd_micros"] == 6600
+
+
+def test_bare_mantle_model_id_falls_back(pricing_bucket):
+    """The wire ID is NOT a catalog key — billing must go through pricing_model_id.
+
+    This pins the failure mode the mantle/ namespace exists to make visible: billing a
+    Responses call by its bare wire ID misses the catalog entirely.
+    """
+    _, _, fallback_applied, fallback_dimensions, _ = compute_cost(
+        model_id="openai.gpt-5.6-luna",
+        pricing_mode="on_demand",
+        input_tokens=1000,
+        output_tokens=1000,
+        cache_read_input_tokens=0,
+        cache_write_input_tokens=0,
+    )
+    assert fallback_applied is True
+    assert "model_id" in fallback_dimensions
+
+
+def test_dual_provider_model_keeps_distinct_rates():
+    """openai.gpt-oss-safeguard-20b exists on BOTH providers at different rates.
+
+    A flat merge of bedrock_mantle into the Converse namespace would silently re-price the
+    Converse entry (+50% output) depending on dict order. Guard both sides.
+    """
+    from pricing import DEFAULT_PRICING
+
+    converse = DEFAULT_PRICING["openai.gpt-oss-safeguard-20b"]["on_demand"]
+    mantle = DEFAULT_PRICING["mantle/openai.gpt-oss-safeguard-20b"]["on_demand"]
+    assert converse["input_usd_micros_per_1k"] == 70
+    assert converse["output_usd_micros_per_1k"] == 200
+    assert mantle["input_usd_micros_per_1k"] == 75
+    assert mantle["output_usd_micros_per_1k"] == 300
+
+
+def test_mantle_family_priced_and_not_region_derived():
+    from pricing import _FALLBACK_BY_MODE, DEFAULT_PRICING
+
+    mantle_ids = [m for m in DEFAULT_PRICING if m.startswith("mantle/")]
+    assert len(mantle_ids) == 13
+    fallback_input = _FALLBACK_BY_MODE["on_demand"]["input_usd_micros_per_1k"]
+    for mid in mantle_ids:
+        assert DEFAULT_PRICING[mid]["on_demand"]["input_usd_micros_per_1k"] < fallback_input
+    # mantle does not support geo/global inference profiles — no phantom regional IDs.
+    assert not [m for m in DEFAULT_PRICING if m.startswith(("us.mantle/", "global.mantle/"))]

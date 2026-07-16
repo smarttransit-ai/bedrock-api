@@ -30,7 +30,28 @@ def _raw() -> dict:
             "input_cost_per_token": 5.0e-06,
             "output_cost_per_token": 1.0e-05,
         },
-        # other bedrock_* provider → filtered out (do not broaden the set)
+        # bedrock_mantle → kept, but namespaced under mantle/ (never merged flat)
+        "bedrock_mantle/openai.gpt-5.6-luna": {
+            "litellm_provider": "bedrock_mantle",
+            "input_cost_per_token": 1.1e-06,
+            "output_cost_per_token": 6.6e-06,
+            "cache_read_input_token_cost": 1.1e-07,
+            "cache_creation_input_token_cost": 1.375e-06,
+        },
+        # Same ID under BOTH providers at DIFFERENT rates — the collision that forces
+        # the mantle/ namespace. A flat merge would let dict order pick the winner.
+        "openai.gpt-oss-safeguard-20b": {
+            "litellm_provider": "bedrock_converse",
+            "input_cost_per_token": 7.0e-08,
+            "output_cost_per_token": 2.0e-07,
+        },
+        "bedrock_mantle/openai.gpt-oss-safeguard-20b": {
+            "litellm_provider": "bedrock_mantle",
+            "input_cost_per_token": 7.5e-08,
+            "output_cost_per_token": 3.0e-07,
+        },
+        # provider says mantle but the key carries no bedrock_mantle/ prefix →
+        # a leftover '/' remains after the strip, so it is dropped as non-routeable.
         "bedrock/mantle-thing": {
             "litellm_provider": "bedrock_mantle",
             "input_cost_per_token": 1.0e-06,
@@ -62,10 +83,56 @@ def test_filter_bedrock_keeps_only_routeable_bedrock():
     assert "anthropic.claude-sonnet-4-6" in f  # bedrock/ stripped
     assert "us.deepseek.r1-v1:0" in f
     assert "gpt-4o" not in f  # non-bedrock provider
-    assert "mantle-thing" not in f  # bedrock_mantle intentionally excluded
-    assert all("/" not in k for k in f)  # no leftover-slash keys
+    assert "mantle-thing" not in f  # mantle provider, but key kept a leftover '/'
     assert "_meta" not in f and "sample_spec" not in f
     assert "amazon.incomplete" not in f  # null output cost
+    # The only '/' permitted in a key is the mantle namespace itself.
+    assert all("/" not in k.removeprefix("mantle/") for k in f)
+
+
+def test_filter_bedrock_namespaces_mantle():
+    f = filter_bedrock(_raw())
+    assert "mantle/openai.gpt-5.6-luna" in f
+    assert "openai.gpt-5.6-luna" not in f  # never leaks into the flat namespace
+
+
+def test_mantle_collision_leaves_converse_rates_untouched():
+    """The dual-provider ID must yield two distinct entries, not one racy winner."""
+    cat = build_catalog(_raw())
+    converse = cat["openai.gpt-oss-safeguard-20b"]["on_demand"]
+    mantle = cat["mantle/openai.gpt-oss-safeguard-20b"]["on_demand"]
+    assert converse["input_usd_micros_per_1k"] == 70
+    assert converse["output_usd_micros_per_1k"] == 200
+    assert mantle["input_usd_micros_per_1k"] == 75
+    assert mantle["output_usd_micros_per_1k"] == 300
+
+
+def test_mantle_rates_and_no_region_derivation():
+    cat = build_catalog(_raw())
+    luna = cat["mantle/openai.gpt-5.6-luna"]["on_demand"]
+    assert luna["input_usd_micros_per_1k"] == 1100
+    assert luna["output_usd_micros_per_1k"] == 6600
+    assert luna["cache_read_input_usd_micros_per_1k"] == 110
+    assert luna["cache_write_input_usd_micros_per_1k"] == 1375
+    # mantle does not support geo/global inference IDs — no phantom regional variants.
+    assert not [k for k in cat if k.startswith(("us.mantle/", "global.mantle/"))]
+    assert not [k for k in cat if k.startswith("mantle/") and ".us." in k]
+
+
+def test_reasoning_cost_field_warns_rather_than_dropping(caplog):
+    """Upstream pricing reasoning separately must be loud, not silent (never dropped)."""
+    raw = {
+        "bedrock_mantle/openai.gpt-future": {
+            "litellm_provider": "bedrock_mantle",
+            "input_cost_per_token": 1.0e-06,
+            "output_cost_per_token": 2.0e-06,
+            "output_cost_per_reasoning_token": 8.0e-06,
+        }
+    }
+    with caplog.at_level("WARNING"):
+        cat = build_catalog(raw)
+    assert "mantle/openai.gpt-future" in cat  # kept: fallback would be far worse
+    assert "pricing_reasoning_cost_ignored" in caplog.text
 
 
 def test_build_catalog_rates_and_derivation():

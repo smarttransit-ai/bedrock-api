@@ -3,6 +3,7 @@
 import boto3
 import pricing_refresh
 import pytest
+from conftest import litellm_raw_from_catalog
 from pricing import DEFAULT_PRICING
 from pricing_catalog import build_catalog
 from pricing_refresh import refresh_pricing, validate_catalog
@@ -15,15 +16,7 @@ def _s3():
 
 def _fixture_raw() -> dict:
     """Raw litellm-shaped map derived from DEFAULT_PRICING (passes size gate + anchors)."""
-    raw = {}
-    for mid, modes in DEFAULT_PRICING.items():
-        od = modes["on_demand"]
-        raw[f"bedrock/{mid}"] = {
-            "litellm_provider": "bedrock_converse",
-            "input_cost_per_token": od["input_usd_micros_per_1k"] / 1e9,
-            "output_cost_per_token": od["output_usd_micros_per_1k"] / 1e9,
-        }
-    return raw
+    return litellm_raw_from_catalog(DEFAULT_PRICING)
 
 
 def _valid_catalog() -> dict:

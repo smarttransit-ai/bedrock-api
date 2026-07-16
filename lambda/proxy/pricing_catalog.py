@@ -15,7 +15,38 @@ litellm is MIT licensed. See scripts/vendor/litellm_model_prices.json for attrib
 
 from __future__ import annotations
 
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
 _BEDROCK_PROVIDERS = frozenset({"bedrock", "bedrock_converse"})
+
+# bedrock-mantle (the OpenAI-compatible endpoint) is priced too, but its IDs are
+# namespaced under "mantle/" rather than merged into the flat Converse namespace.
+# Two IDs — openai.gpt-oss-safeguard-120b/20b — exist under BOTH bedrock_converse and
+# bedrock_mantle at DIFFERENT rates (safeguard-20b: $0.07/$0.20 vs $0.075/$0.30 per 1M).
+# A flat merge would let dict order decide the winner and silently re-price an existing
+# Converse model. Namespacing keeps them distinct; the caller selects by route, never by
+# parsing the model string (openai.* legitimately spans both providers).
+_MANTLE_PROVIDER = "bedrock_mantle"
+MANTLE_NAMESPACE = "mantle/"
+
+_PRICED_PROVIDERS = _BEDROCK_PROVIDERS | {_MANTLE_PROVIDER}
+
+# Upstream litellm key prefix per provider. Stripped before namespacing; a key that still
+# holds a '/' afterward is a non-routeable region/routing/image-size variant and is dropped.
+_UPSTREAM_PREFIX = {_MANTLE_PROVIDER: "bedrock_mantle/"}
+_DEFAULT_UPSTREAM_PREFIX = "bedrock/"
+
+# litellm prices reasoning separately via this field (e.g. dashscope/qwen-plus: $1.20
+# output vs $4.00 reasoning per 1M). No bedrock/bedrock_converse/bedrock_mantle entry
+# carries it today, so reasoning tokens bill at the standard output rate — and since the
+# Responses API counts them WITHIN output_tokens, billing output_tokens is complete.
+# If upstream ever adds it to a priced model we would silently underbill, so warn loudly
+# rather than fail closed (failing closed would drop the model to the Opus-tier fallback,
+# which over-counts ~11x — strictly worse than a known-stale rate).
+_REASONING_COST_FIELD = "output_cost_per_reasoning_token"
 
 # Prefixes derived outward (base → regional) in Pass 2a.
 _DERIVE_PREFIXES = ("us.", "global.")
@@ -91,15 +122,21 @@ def _to_on_demand_rates(entry: dict) -> dict[str, int]:
 
 
 def filter_bedrock(raw: dict) -> dict:
-    """Filter a raw litellm price map down to routeable Bedrock entries.
+    """Filter a raw litellm price map down to routeable entries, keyed for the catalog.
 
     Reproduces in Python the jq filter applied at vendor time (see the vendor
     file's _meta.filter). Keeps entries whose ``litellm_provider`` is in
-    ``_BEDROCK_PROVIDERS`` (intentionally excludes other ``bedrock_*`` providers
-    such as ``bedrock_mantle`` — they are non-routeable here; do not broaden the
-    set without reason) and whose input+output token costs are both non-null.
-    Strips a leading ``bedrock/`` from each key and drops keys that still contain
-    a ``/`` afterward (non-routeable region/routing/image-size prefixes).
+    ``_PRICED_PROVIDERS`` and whose input+output token costs are both non-null.
+
+    Two provider families are kept, keyed differently:
+      - ``bedrock`` / ``bedrock_converse`` → ``bedrock/`` stripped, key used as-is
+        (e.g. ``anthropic.claude-sonnet-4-6``).
+      - ``bedrock_mantle`` → ``bedrock_mantle/`` stripped, key namespaced under
+        ``mantle/`` (e.g. ``mantle/openai.gpt-5.6-luna``). See MANTLE_NAMESPACE for
+        why these are namespaced rather than merged.
+
+    Keys still containing a ``/`` after the provider prefix is stripped are dropped
+    (non-routeable region/routing/image-size prefixes).
     """
     filtered: dict = {}
     for key, entry in raw.items():
@@ -107,14 +144,16 @@ def filter_bedrock(raw: dict) -> dict:
             continue
         if not isinstance(entry, dict):
             continue
-        if entry.get("litellm_provider") not in _BEDROCK_PROVIDERS:
+        provider = entry.get("litellm_provider")
+        if provider not in _PRICED_PROVIDERS:
             continue
         if entry.get("input_cost_per_token") is None or entry.get("output_cost_per_token") is None:
             continue
-        stripped = key[len("bedrock/") :] if key.startswith("bedrock/") else key
+        stripped = key.removeprefix(_UPSTREAM_PREFIX.get(provider, _DEFAULT_UPSTREAM_PREFIX))
         if "/" in stripped:
             continue
-        filtered[stripped] = entry
+        namespace = MANTLE_NAMESPACE if provider == _MANTLE_PROVIDER else ""
+        filtered[namespace + stripped] = entry
     return filtered
 
 
@@ -138,12 +177,24 @@ def _build_entries(
     # The vendor file filter already enforces the constraints below; the guards
     # here are a belt-and-suspenders double-check against schema drift.
     for model_id, entry in vendor.items():
-        if entry.get("litellm_provider") not in _BEDROCK_PROVIDERS:
+        if entry.get("litellm_provider") not in _PRICED_PROVIDERS:
             continue
         inp_cost = entry.get("input_cost_per_token")
         out_cost = entry.get("output_cost_per_token")
         if inp_cost is None or out_cost is None:
             continue
+        # Upstream started pricing reasoning separately for this model — our rates no
+        # longer capture its full cost. Warn (do not drop: the fallback is far worse).
+        if entry.get(_REASONING_COST_FIELD) is not None:
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "pricing_reasoning_cost_ignored",
+                        "model_id": model_id,
+                        "reasoning_cost_per_token": entry[_REASONING_COST_FIELD],
+                    }
+                )
+            )
         # Drop entries with no billing value (both token costs 0) — e.g. rerank
         # models at 0/0. Including them would underbill (route to fallback at $0).
         # Token-priced embeddings (input > 0, output 0) ARE billable and kept.
@@ -191,7 +242,8 @@ def _build_entries(
 def build_catalog(raw: dict) -> dict[str, dict[str, dict[str, int]]]:
     """Full transform: raw litellm price map → pricing catalog.
 
-    Filters to routeable Bedrock entries then builds the µUSD on_demand/batch map.
+    Filters to routeable bedrock-runtime + bedrock-mantle entries (the latter namespaced
+    under mantle/, see filter_bedrock) then builds the µUSD on_demand/batch map.
     Same shape as DEFAULT_PRICING in pricing.py.
     """
     return _build_entries(filter_bedrock(raw))[0]
