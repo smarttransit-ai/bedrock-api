@@ -16,10 +16,15 @@ POST {API_URL}/model/{url-encoded-model-id}/converse
 POST {API_URL}/model/{url-encoded-model-id}/invoke
 POST {API_URL}/model/{url-encoded-model-id}/converse-stream                # SSE
 POST {API_URL}/model/{url-encoded-model-id}/invoke-with-response-stream    # SSE
+POST {API_URL}/openai/v1/responses                                         # OpenAI models
 ```
 
 `{API_URL}` includes the API Gateway stage, e.g.
 `https://<id>.execute-api.us-east-1.amazonaws.com/v1`.
+
+The last route reaches a different family of models (OpenAI, Gemma, Grok) over the
+OpenAI **Responses API**; it takes the model in the request body rather than the path.
+See "OpenAI models" below.
 
 Model IDs contain colons (`:`), which must be percent-encoded as `%3A`:
 
@@ -152,6 +157,48 @@ data: {"metadata": {"usage": {"inputTokens": 10, "outputTokens": 4, "totalTokens
 `invoke-with-response-stream` relays the InvokeModel chunk payloads the same way
 (each chunk's bytes decoded to JSON, bytes-valued fields base64-encoded for
 transport).
+
+---
+
+## OpenAI models (Responses API)
+
+Some models — `openai.gpt-5.6-luna`, `openai.gpt-5.6-sol`, `openai.gpt-5.6-terra`,
+`openai.gpt-oss-120b`, `google.gemma-4-31b`, `xai.grok-4.3` and friends — are **not**
+reachable through `converse` / `invoke`; they are served on the OpenAI **Responses API**
+and rejected as invalid model IDs by the Bedrock routes. Use `/openai/v1/responses`:
+
+```bash
+curl -s -X POST "${API_URL}/openai/v1/responses" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openai.gpt-5.6-luna","input":"Hello!"}'
+```
+
+The model goes in the **body**, not the path — so this route needs no percent-encoding.
+The request and response bodies are passed through unmodified, which means you can point
+the official OpenAI SDK straight at the proxy:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url=f"{API_URL}/openai/v1", api_key=TOKEN)
+resp = client.responses.create(model="openai.gpt-5.6-luna", input="Hello!")
+print(resp.output_text)
+```
+
+Your bearer token goes in `api_key`; the proxy signs the upstream AWS request itself.
+
+Add `"stream": true` to receive Server-Sent Events. Unlike the Bedrock streaming routes,
+these frames carry the Responses API's own `event:` type lines alongside each `data:`
+line, relayed verbatim, so SDK streaming (`client.responses.stream(...)`) works normally.
+
+Your per-token limits, budget, and model allowlist apply exactly as they do on the
+Bedrock routes. The allowlist matches the model ID as written in the body.
+
+**Token accounting.** Usage is reported as `input_tokens` / `output_tokens`, with a
+breakdown in `output_tokens_details.reasoning_tokens`. Reasoning tokens are **already
+counted inside `output_tokens`** — they are billed at the normal output rate and are not
+charged twice. `GET /usage` reports them within your output-token total.
 
 ---
 

@@ -4,6 +4,7 @@ import logging
 from collections.abc import Generator
 
 from botocore.exceptions import ClientError, ParamValidationError
+from routes import ROUTE_CONVERSE, ROUTE_RESPONSES
 
 logger = logging.getLogger(__name__)
 
@@ -30,23 +31,29 @@ class BedrockError(Exception):
 
 
 def apply_output_cap(body: dict, route: str, max_output_tokens: int | None) -> dict:
-    """Inject output token cap into the request body before forwarding to Bedrock.
+    """Inject output token cap into the request body before forwarding upstream.
 
     Takes the minimum of the user-specified value and the cap so we never
     exceed the per-token limit while still honouring lower user requests.
     Returns a shallow copy of body; does not mutate the caller's dict.
+
+    Each protocol names the field differently: Converse nests maxTokens under
+    inferenceConfig, InvokeModel uses max_tokens, and the Responses API uses
+    max_output_tokens (it ignores max_tokens outright, so getting this branch wrong
+    silently disables the cap rather than erroring).
     """
     if max_output_tokens is None:
         return body
     body = dict(body)
-    if route == "converse":
+    if route == ROUTE_CONVERSE:
         inf_cfg = dict(body.get("inferenceConfig") or {})
         existing = inf_cfg.get("maxTokens")
         inf_cfg["maxTokens"] = min(existing, max_output_tokens) if existing else max_output_tokens
         body["inferenceConfig"] = inf_cfg
-    else:
-        existing = body.get("max_tokens")
-        body["max_tokens"] = min(existing, max_output_tokens) if existing else max_output_tokens
+        return body
+    field = "max_output_tokens" if route == ROUTE_RESPONSES else "max_tokens"
+    existing = body.get(field)
+    body[field] = min(existing, max_output_tokens) if existing else max_output_tokens
     return body
 
 

@@ -226,3 +226,38 @@ def converse_response(
         },
         "metrics": {"latencyMs": 50},
     }
+
+
+# ---------------------------------------------------------------------------
+# litellm fixture helpers
+# ---------------------------------------------------------------------------
+
+
+def litellm_raw_from_catalog(catalog: dict, factor: float = 1.0) -> dict:
+    """Build a raw litellm-shaped map that round-trips *catalog* through build_catalog.
+
+    Inverts the catalog's key namespacing: a ``mantle/<id>`` entry must be emitted as
+    ``bedrock_mantle/<id>`` with litellm_provider ``bedrock_mantle``, everything else as
+    ``bedrock/<id>`` with ``bedrock_converse``. Prefixing mantle keys with ``bedrock/``
+    instead would leave a slash in the stripped key, so filter_bedrock would drop them and
+    the rebuilt catalog would silently lose the whole mantle family.
+
+    ``factor`` scales every rate (used to exercise the drift band).
+    """
+    from pricing_catalog import MANTLE_NAMESPACE
+
+    raw = {}
+    for model_id, modes in catalog.items():
+        od = modes["on_demand"]
+        if model_id.startswith(MANTLE_NAMESPACE):
+            key = f"bedrock_mantle/{model_id.removeprefix(MANTLE_NAMESPACE)}"
+            provider = "bedrock_mantle"
+        else:
+            key = f"bedrock/{model_id}"
+            provider = "bedrock_converse"
+        raw[key] = {
+            "litellm_provider": provider,
+            "input_cost_per_token": od["input_usd_micros_per_1k"] / 1e9 * factor,
+            "output_cost_per_token": od["output_usd_micros_per_1k"] / 1e9 * factor,
+        }
+    return raw

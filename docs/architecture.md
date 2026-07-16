@@ -15,12 +15,14 @@ graph LR
     Lambda["Lambda (container, LWA)<br/>bedrock-api-proxy"]
     DynamoDB["DynamoDB<br/>3 tables"]
     Bedrock["AWS Bedrock Runtime<br/>Converse(Stream) + InvokeModel(WithResponseStream)"]
+    Mantle["AWS bedrock-mantle<br/>OpenAI Responses API"]
     CloudWatch["CloudWatch<br/>logs · metrics · alarms"]
 
     Client -->|HTTPS| APIGW
     APIGW -->|AWS_PROXY| Lambda
     Lambda <-->|auth · usage · rate limit| DynamoDB
-    Lambda -->|routed by URL path| Bedrock
+    Lambda -->|boto3 · routed by URL path| Bedrock
+    Lambda -->|httpx + SigV4 · /openai/v1/responses| Mantle
     Lambda -->|JSON logs| CloudWatch
     APIGW -->|access logs| CloudWatch
 
@@ -57,6 +59,8 @@ graph TB
 
     Bedrock["AWS Bedrock Runtime<br/>/converse(-stream) → Converse(Stream)<br/>/invoke(-with-response-stream) → InvokeModel(WithResponseStream)"]
 
+    Mantle["AWS bedrock-mantle<br/>/openai/v1/responses → Responses API<br/>(openai.* · google.gemma-4-* · xai.grok-4.3)"]
+
     PricingS3["S3: bedrock-api-pricing-&lt;account&gt;<br/>pricing/current.json<br/>(live pricing catalog)"]
 
     subgraph CW["CloudWatch"]
@@ -85,6 +89,40 @@ graph TB
     class Bedrock bedrockStyle
     class Client clientStyle
 ```
+
+---
+
+## Upstreams and pricing namespace
+
+The proxy fronts **two** AWS model endpoints. Everything before the transport — auth,
+rate limit, quota/budget, input cap, model allowlist, output cap, billing, logging — is
+shared; only the client and usage parsing differ.
+
+| | bedrock-runtime | bedrock-mantle |
+|---|---|---|
+| Routes | `/model/{model_id}/converse\|invoke[-stream]` | `/openai/v1/responses` |
+| Transport | boto3 (`lambda/proxy/bedrock.py`) | httpx + SigV4 (`lambda/proxy/mantle.py`) |
+| Model ID | URL path | request body (`model`) |
+| Models | `anthropic.*`, `amazon.*`, `meta.*`, … | `openai.*`, `google.gemma-4-*`, `xai.grok-4.3` |
+| Streaming | Bedrock event stream → `data:` frames | SSE relayed verbatim (`event:` lines preserved) |
+| Inference profiles | `us.*` / `global.*` supported | not supported |
+
+Both are signed under the `bedrock` SigV4 service name and share one IAM statement.
+
+**Pricing keys are namespaced, and this is load-bearing.** litellm prices mantle models
+under `bedrock_mantle/<id>`; the catalog stores them as `mantle/<id>`. They are *not*
+merged into the flat Converse namespace because `openai.gpt-oss-safeguard-120b/20b` exist
+under **both** providers at **different** rates — a flat merge would let dict ordering
+silently re-price an existing Converse model.
+
+Consequently the provider is chosen by **route**, never by parsing the model string
+(`openai.*` legitimately spans both). `PreflightResult.pricing_model_id` carries the
+catalog key (`mantle/<id>` on the responses route, else the wire ID) and is derived once
+in `run_preflight`; every biller reads it. Billing a mantle call by its bare wire ID would
+miss the catalog and charge the Opus-tier fallback (~11x) with nothing failing loudly.
+
+Reasoning tokens (`output_tokens_details.reasoning_tokens`) are a **subset** of
+`output_tokens`, not an additive dimension: they are logged, never billed separately.
 
 ---
 

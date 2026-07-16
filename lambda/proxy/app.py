@@ -15,6 +15,7 @@ Environment variables (optional):
   PRICING_BUCKET          — S3 bucket holding the live pricing catalog
   LITELLM_SOURCE_URL      — upstream litellm price map URL (refresh source)
   PRICING_CACHE_TTL_S     — live-catalog cache TTL in seconds (default: 60)
+  MANTLE_ENDPOINT_URL     — bedrock-mantle base URL (default: derived from BEDROCK_REGION)
 
 Pre-flight order (cheap rejects first):
   1. parse bearer token from Authorization header         → 401
@@ -34,6 +35,15 @@ Phase B seam: streaming routes (POST /model/{model_id}/converse-stream and
 POST /model/{model_id}/invoke-with-response-stream) attach here using
 ``run_preflight`` + ``bedrock.open_converse_stream`` / ``open_invoke_stream``
 (per amendment B1) before constructing a StreamingResponse.
+
+Two upstreams, two transports (issue #8):
+  - bedrock-runtime  — boto3 Converse/InvokeModel; routes /model/{model_id}/...
+  - bedrock-mantle   — httpx + SigV4, OpenAI Responses API; route /openai/v1/responses
+
+The mantle route is NOT /model/{model_id}/... on purpose: the Responses API carries the
+model in the body, and mirroring the real OpenAI path lets clients point an OpenAI SDK at
+base_url=<proxy>/openai/v1 unmodified. Only the transport and usage-parsing differ — the
+pre-flight, output cap, billing, and logging above are shared by both.
 """
 
 import json
@@ -55,7 +65,7 @@ from bedrock import (
     open_converse_stream,
     open_invoke_stream,
 )
-from deps import get_bedrock, get_s3, get_tables
+from deps import get_bedrock, get_mantle, get_s3, get_tables
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from limits import (
@@ -67,9 +77,17 @@ from limits import (
     estimate_input_tokens,
     write_usage,
 )
+from mantle import (
+    forward_responses,
+    iter_responses_sse,
+    open_responses_stream,
+    reasoning_tokens_of,
+)
 from pricing import compute_cost, invalidate_cache
+from pricing_catalog import MANTLE_NAMESPACE
 from pricing_refresh import refresh_pricing
 from pricing_store import load_live_meta
+from routes import ROUTE_CONVERSE, ROUTE_INVOKE, ROUTE_RESPONSES
 
 # Ensure INFO-level logs emit under uvicorn / Lambda Web Adapter (which does
 # not configure the root logger; without this, the root logger stays WARNING
@@ -98,7 +116,13 @@ class PreflightResult:
     token_row: dict
     period: str
     body: dict  # raw parsed request body; output cap is applied by the route handler (B5)
-    model_id: str
+    model_id: str  # wire ID, sent upstream and logged
+    # Catalog key for compute_cost. Differs from model_id ONLY on the responses route,
+    # where mantle prices are namespaced (mantle/<id>) to avoid colliding with the
+    # Converse namespace — see pricing_catalog.MANTLE_NAMESPACE. Derived once here so
+    # every biller (streaming and non-streaming) is correct by construction: billing from
+    # the bare wire ID would miss the catalog and silently charge the Opus-tier fallback.
+    pricing_model_id: str
     pricing_mode: str
     log_ctx: dict
     start_ms: float
@@ -180,7 +204,7 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
 
 async def run_preflight(
     request: Request,
-    model_id: str,
+    model_id: str | None,
     route: str,
     tables,
 ) -> PreflightResult:
@@ -189,6 +213,10 @@ async def run_preflight(
     Raises AuthError, LimitError, or BedrockError on rejection.
     Output cap (apply_output_cap) is NOT applied here — it is a separate
     route step (amendment B5) so each route applies it explicitly.
+
+    ``model_id`` is None for the responses route, where the OpenAI Responses API carries
+    the model in the body rather than the path; it is resolved after the body parse and
+    still before the allowlist check, so no route can reach a model the token may not use.
     """
     start_ms = time.monotonic() * 1000
     tokens_table, usage_table, rate_limit_table = tables
@@ -197,6 +225,11 @@ async def run_preflight(
     # Step 1–4: Authentication
     token_id, secret = parse_bearer_token_from_request(request)
     log_ctx["token_id"] = token_id
+    # Populated as soon as it is known. On the responses route the model lives in the body,
+    # which is parsed only after auth/rate-limit/quota — so pre-body rejections there log
+    # model_id: null rather than a wrong value. Auth-before-body-parse is deliberate.
+    if model_id is not None:
+        log_ctx["model_id"] = model_id
 
     token_row = tokens_table.get_item(Key={"token_id": token_id}).get("Item")
     if not token_row or token_row.get("status") != "active":
@@ -223,12 +256,18 @@ async def run_preflight(
     except (json.JSONDecodeError, ValueError) as exc:
         raise BedrockError("BAD_REQUEST", "Invalid JSON in request body", 400) from exc
 
+    # Step 7c: Resolve the model for body-carried routes (responses).
+    if model_id is None:
+        model_id = body.get("model") if isinstance(body, dict) else None
+        if not isinstance(model_id, str) or not model_id:
+            raise BedrockError("BAD_REQUEST", "Missing or invalid 'model' in request body", 400)
     log_ctx["model_id"] = model_id
 
     # Step 8: Input token cap (heuristic)
     check_input_cap(estimate_input_tokens(body, route), token_row)
 
-    # Step 9: Model allowlist
+    # Step 9: Model allowlist — enforced on the raw wire ID for every route, so a
+    # body-carried model is gated exactly like a path-carried one.
     check_model_allowlist(model_id, token_row, _allowed_models_default())
 
     raw_mode = token_row.get("pricing_mode", "on_demand")
@@ -245,6 +284,9 @@ async def run_preflight(
         period=period,
         body=body,
         model_id=model_id,
+        pricing_model_id=(
+            f"{MANTLE_NAMESPACE}{model_id}" if route == ROUTE_RESPONSES else model_id
+        ),
         pricing_mode=pricing_mode,
         log_ctx=log_ctx,
         start_ms=start_ms,
@@ -281,6 +323,94 @@ async def health():
     return {"status": "ok"}
 
 
+def _bill_nonstreaming_response(
+    upstream_resp: dict,
+    usage: dict,
+    pf: PreflightResult,
+    log_ctx: dict,
+    start_ms: float,
+) -> JSONResponse:
+    """Bill a completed non-streaming call, emit the audit logs, return the response.
+
+    Shared by the Bedrock (converse/invoke) and mantle (responses) non-streaming paths —
+    they differ only in transport, so billing and observability stay single-sourced.
+
+    Billing keys off pf.pricing_model_id, never pf.model_id: on the responses route the
+    catalog key is namespaced (mantle/<id>) and the bare wire ID would miss the catalog,
+    silently charging the Opus-tier fallback.
+    """
+    in_tok = usage["input_tokens"]
+    out_tok = usage["output_tokens"]
+    cache_read_tok = usage["cache_read_input_tokens"]
+    cache_write_tok = usage["cache_write_input_tokens"]
+    log_ctx.update(
+        input_tokens=in_tok,
+        output_tokens=out_tok,
+        cache_read_input_tokens=cache_read_tok,
+        cache_write_input_tokens=cache_write_tok,
+    )
+
+    # The upstream call already succeeded and consumed tokens, so a billing failure must not
+    # turn into a 500 that tells the caller to retry — return their response and log the
+    # failure, matching the streaming path (_post_flight_write).
+    try:
+        (
+            usd_micros,
+            component_micros,
+            fallback_applied,
+            fallback_dimensions,
+            applied_rates,
+        ) = compute_cost(
+            model_id=pf.pricing_model_id,
+            pricing_mode=pf.pricing_mode,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            cache_read_input_tokens=cache_read_tok,
+            cache_write_input_tokens=cache_write_tok,
+        )
+    except Exception as exc:
+        logger.error(json.dumps({**log_ctx, "event": "billing_failed", "error": str(exc)}))
+        return JSONResponse(upstream_resp)
+
+    log_ctx["usd_micros"] = usd_micros
+    logger.info(
+        json.dumps(
+            {
+                **log_ctx,
+                "event": "pricing_audit",
+                "pricing_model_id": pf.pricing_model_id,
+                "component_micros": component_micros,
+                "applied_rates": applied_rates,
+                "fallback_applied": fallback_applied,
+                "fallback_dimensions": fallback_dimensions,
+                "status": 200,
+            }
+        )
+    )
+
+    try:
+        write_usage(
+            pf.token_id,
+            pf.period,
+            in_tok,
+            out_tok,
+            cache_read_tok,
+            cache_write_tok,
+            usd_micros,
+            pf.usage_table,
+        )
+    except Exception as exc:
+        logger.error(json.dumps({**log_ctx, "event": "usage_write_failed", "error": str(exc)}))
+
+    latency_ms = int((time.monotonic() * 1000) - start_ms)
+    logger.info(
+        json.dumps(
+            {**log_ctx, "event": "request_complete", "status": 200, "latency_ms": latency_ms}
+        )
+    )
+    return JSONResponse(upstream_resp)
+
+
 async def _run_nonstreaming(
     model_id: str,
     request: Request,
@@ -294,6 +424,7 @@ async def _run_nonstreaming(
     The two routes differ only by route name and the Bedrock forward function;
     the pre-flight, output-cap, billing, and logging flow is identical.
     """
+    # Billing/logging tail is _bill_nonstreaming_response, shared with the responses route.
     start_ms = time.monotonic() * 1000
     log_ctx: dict = {}
 
@@ -310,69 +441,10 @@ async def _run_nonstreaming(
         )
         body = apply_output_cap(pf.body, route, max_out)
 
-        bedrock_resp, usage = forward_fn(bedrock_client, model_id, body)
-
-        in_tok = usage["input_tokens"]
-        out_tok = usage["output_tokens"]
-        cache_read_tok = usage["cache_read_input_tokens"]
-        cache_write_tok = usage["cache_write_input_tokens"]
-        log_ctx.update(
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            cache_read_input_tokens=cache_read_tok,
-            cache_write_input_tokens=cache_write_tok,
-        )
-
-        (
-            usd_micros,
-            component_micros,
-            fallback_applied,
-            fallback_dimensions,
-            applied_rates,
-        ) = compute_cost(
-            model_id=model_id,
-            pricing_mode=pf.pricing_mode,
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            cache_read_input_tokens=cache_read_tok,
-            cache_write_input_tokens=cache_write_tok,
-        )
-        log_ctx["usd_micros"] = usd_micros
-        logger.info(
-            json.dumps(
-                {
-                    **log_ctx,
-                    "event": "pricing_audit",
-                    "component_micros": component_micros,
-                    "applied_rates": applied_rates,
-                    "fallback_applied": fallback_applied,
-                    "fallback_dimensions": fallback_dimensions,
-                    "status": 200,
-                }
-            )
-        )
-
-        try:
-            write_usage(
-                pf.token_id,
-                pf.period,
-                in_tok,
-                out_tok,
-                cache_read_tok,
-                cache_write_tok,
-                usd_micros,
-                pf.usage_table,
-            )
-        except Exception as exc:
-            logger.error(json.dumps({**log_ctx, "event": "usage_write_failed", "error": str(exc)}))
-
-        latency_ms = int((time.monotonic() * 1000) - start_ms)
-        logger.info(
-            json.dumps(
-                {**log_ctx, "event": "request_complete", "status": 200, "latency_ms": latency_ms}
-            )
-        )
-        return JSONResponse(bedrock_resp)
+        # pf.model_id, not the model_id argument: the latter is None on the responses
+        # route, where preflight resolves the model from the body.
+        upstream_resp, usage = forward_fn(bedrock_client, pf.model_id, body)
+        return _bill_nonstreaming_response(upstream_resp, usage, pf, log_ctx, start_ms)
 
     except (AuthError, LimitError, BedrockError) as exc:
         return _handle_known_error(exc, log_ctx, start_ms)
@@ -393,7 +465,7 @@ async def converse(
 ):
     """POST /model/{model_id}/converse — non-streaming Converse API proxy."""
     return await _run_nonstreaming(
-        model_id, request, tables, bedrock_client, "converse", forward_converse
+        model_id, request, tables, bedrock_client, ROUTE_CONVERSE, forward_converse
     )
 
 
@@ -406,7 +478,7 @@ async def invoke(
 ):
     """POST /model/{model_id}/invoke — non-streaming InvokeModel API proxy."""
     return await _run_nonstreaming(
-        model_id, request, tables, bedrock_client, "invoke", forward_invoke_model
+        model_id, request, tables, bedrock_client, ROUTE_INVOKE, forward_invoke_model
     )
 
 
@@ -601,7 +673,7 @@ def _post_flight_write(usage_out: dict, pf: PreflightResult, log_ctx: dict) -> N
             fallback_dimensions,
             applied_rates,
         ) = compute_cost(
-            model_id=pf.model_id,
+            model_id=pf.pricing_model_id,
             pricing_mode=pf.pricing_mode,
             input_tokens=in_tok,
             output_tokens=out_tok,
@@ -619,6 +691,7 @@ def _post_flight_write(usage_out: dict, pf: PreflightResult, log_ctx: dict) -> N
             {
                 **log_ctx,
                 "event": "pricing_audit",
+                "pricing_model_id": pf.pricing_model_id,
                 "component_micros": component_micros,
                 "applied_rates": applied_rates,
                 "fallback_applied": fallback_applied,
@@ -771,7 +844,7 @@ async def converse_stream(
         request,
         tables,
         bedrock_client,
-        "converse",
+        ROUTE_CONVERSE,
         open_converse_stream,
         iter_converse_stream,
         "stream",
@@ -791,8 +864,99 @@ async def invoke_with_response_stream(
         request,
         tables,
         bedrock_client,
-        "invoke",
+        ROUTE_INVOKE,
         open_invoke_stream,
         iter_invoke_stream,
         "body",
+    )
+
+
+# ---------------------------------------------------------------------------
+# bedrock-mantle — OpenAI Responses API (second provider path, issue #8)
+# ---------------------------------------------------------------------------
+
+
+def _mantle_sse_relay(resp, usage_out: dict, pf: PreflightResult, log_ctx: dict):
+    """Relay mantle SSE verbatim, then bill in finally (parity with _sse_stream).
+
+    Deliberately NOT _sse_stream: that emitter re-serializes parsed events as data-only
+    frames, which would strip the ``event: <type>`` lines the Responses stream pairs with
+    each ``data:`` line and that OpenAI clients dispatch on. Here the upstream bytes pass
+    through untouched and only the terminal event is inspected, for usage.
+
+    Unlike _sse_stream there is no BedrockError branch: the Bedrock event stream signals
+    mid-stream failures as errors members (bedrock._check_eventstream_error raises), while
+    mantle reports them as ordinary SSE ``error`` frames that relay through untouched.
+    """
+    try:
+        yield from iter_responses_sse(resp, usage_out)
+    except Exception as exc:
+        logger.exception(json.dumps({**log_ctx, "event": "stream_error", "error": str(exc)}))
+        yield (
+            "data: "
+            + json.dumps({"error": {"code": "STREAM_ERROR", "message": "Stream error"}})
+            + "\n\n"
+        )
+    finally:
+        if usage_out:
+            log_ctx["reasoning_tokens"] = usage_out.pop("reasoning_tokens", 0)
+        _post_flight_write(usage_out, pf, log_ctx)
+
+
+@app.post("/openai/v1/responses")
+async def responses(
+    request: Request,
+    tables=Depends(get_tables),
+    mantle_client=Depends(get_mantle),
+):
+    """POST /openai/v1/responses — bedrock-mantle OpenAI Responses API proxy.
+
+    Not /model/{model_id}/... like the Bedrock routes: the Responses API carries the model
+    in the body, and matching the real OpenAI path lets clients point an OpenAI SDK at
+    ``base_url=<proxy>/openai/v1`` unmodified. Preflight resolves the model from the body
+    and still gates it through the same allowlist.
+
+    Streaming is chosen by the body's ``stream`` flag, so the branch happens after
+    preflight — the body must not be parsed before authentication.
+    """
+    start_ms = time.monotonic() * 1000
+    log_ctx: dict = {}
+
+    try:
+        pf = await run_preflight(request, None, ROUTE_RESPONSES, tables)
+        log_ctx = pf.log_ctx
+        start_ms = pf.start_ms
+
+        max_out = (
+            int(pf.token_row["limit_max_output_tokens"])
+            if "limit_max_output_tokens" in pf.token_row
+            else None
+        )
+        body = apply_output_cap(pf.body, ROUTE_RESPONSES, max_out)
+        streaming = bool(body.get("stream"))
+
+        if not streaming:
+            upstream_resp, usage = forward_responses(mantle_client, pf.model_id, body)
+            # Observability only — reasoning tokens are counted WITHIN output_tokens by the
+            # Responses API, so billing them as a component would double-charge (DD2).
+            log_ctx["reasoning_tokens"] = reasoning_tokens_of(upstream_resp.get("usage"))
+            return _bill_nonstreaming_response(upstream_resp, usage, pf, log_ctx, start_ms)
+
+        # B1 parity: open eagerly so upstream 4xx/5xx surface before StreamingResponse.
+        resp = open_responses_stream(mantle_client, pf.model_id, body)
+
+    except (AuthError, LimitError, BedrockError) as exc:
+        return _handle_known_error(exc, log_ctx, start_ms)
+    except Exception:
+        latency_ms = int((time.monotonic() * 1000) - start_ms)
+        logger.exception(
+            json.dumps({**log_ctx, "event": "unhandled_error", "latency_ms": latency_ms})
+        )
+        return _error_json(500, "INTERNAL_ERROR", "Internal server error")
+
+    usage_out: dict = {}
+    return StreamingResponse(
+        _mantle_sse_relay(resp, usage_out, pf, log_ctx),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

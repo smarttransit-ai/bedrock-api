@@ -3,6 +3,7 @@ import math
 import time
 
 from botocore.exceptions import ClientError
+from routes import ROUTE_CONVERSE, ROUTE_RESPONSES
 
 
 class LimitError(Exception):
@@ -79,7 +80,30 @@ def estimate_input_tokens(body: dict, route: str) -> int:
 
 def _extract_chars(body: dict, route: str) -> int:
     chars = 0
-    if route == "converse":
+    if route == ROUTE_RESPONSES:
+        # Responses API: `input` is either a bare string or a list of items whose
+        # content blocks carry text; `instructions` is its analogue of `system`.
+        # Without this branch the estimate would fall through to len(json.dumps(body)),
+        # which counts the whole JSON envelope and would misfire check_input_cap.
+        payload = body.get("input", "")
+        if isinstance(payload, str):
+            chars += len(payload)
+        elif isinstance(payload, list):
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                content = item.get("content", "")
+                if isinstance(content, str):
+                    chars += len(content)
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict):
+                            chars += len(block.get("text", ""))
+        instructions = body.get("instructions", "")
+        if isinstance(instructions, str):
+            chars += len(instructions)
+        return chars
+    if route == ROUTE_CONVERSE:
         for msg in body.get("messages", []):
             for block in msg.get("content", []):
                 if isinstance(block, dict):

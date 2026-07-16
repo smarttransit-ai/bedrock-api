@@ -3,21 +3,14 @@
 import boto3
 import pricing_refresh
 import pytest
-from conftest import _make_token
+from conftest import _make_token, litellm_raw_from_catalog
 from pricing import DEFAULT_PRICING
 from pricing_store import load_live_catalog
 
 
 def _raw_scaled(factor: float = 1.0) -> dict:
     """litellm-shaped map from DEFAULT_PRICING with rates scaled by ``factor`` (stays in-band)."""
-    return {
-        f"bedrock/{mid}": {
-            "litellm_provider": "bedrock_converse",
-            "input_cost_per_token": v["on_demand"]["input_usd_micros_per_1k"] / 1e9 * factor,
-            "output_cost_per_token": v["on_demand"]["output_usd_micros_per_1k"] / 1e9 * factor,
-        }
-        for mid, v in DEFAULT_PRICING.items()
-    }
+    return litellm_raw_from_catalog(DEFAULT_PRICING, factor)
 
 
 @pytest.fixture()
