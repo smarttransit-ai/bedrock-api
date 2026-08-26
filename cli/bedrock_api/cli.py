@@ -24,6 +24,29 @@ def _die(msg: str, code: int = 1) -> None:
     sys.exit(code)
 
 
+def token_id_arg(value: str) -> str:
+    """Accept a token id, and tolerate a full bearer token without ever echoing its secret.
+
+    A bearer is ``<token_id>.<secret>``. Passing the whole thing is an easy mistake: it is what
+    lives in a caller's .env, and it starts with the same ``bk_`` prefix as the id. Every command
+    here echoes ``args.token_id`` back in error and confirmation messages, so an unsplit bearer
+    ends up in terminal scrollback, CI logs and shell history -- a working credential, disclosed
+    by a typo.
+
+    Splitting at the argparse boundary fixes all of those call sites at once, because the secret
+    half never reaches ``args`` and so cannot reach a print. It also turns a confusing
+    "token_id not found" into a hint about what the caller actually did.
+    """
+    token_id, sep, _secret = value.partition(".")
+    if sep:
+        print(
+            f"note: got a full bearer token; using the id before the '.' ({token_id}). "
+            "The secret half is not needed and has not been logged.",
+            file=sys.stderr,
+        )
+    return token_id
+
+
 def _get_tables(args):
     region = args.region
     dynamodb = boto3.resource("dynamodb", region_name=region)
@@ -383,7 +406,11 @@ def build_parser():
 
     # revoke
     p_revoke = sub.add_parser("revoke", help="Revoke a token")
-    p_revoke.add_argument("token_id", help="Token ID (bk_...)")
+    p_revoke.add_argument(
+        "token_id",
+        type=token_id_arg,
+        help="Token ID (bk_...); a full bearer token is accepted and split",
+    )
 
     # list
     p_list = sub.add_parser("list", help="List tokens")
@@ -397,11 +424,19 @@ def build_parser():
 
     # show
     p_show = sub.add_parser("show", help="Show token details and current usage")
-    p_show.add_argument("token_id", help="Token ID (bk_...)")
+    p_show.add_argument(
+        "token_id",
+        type=token_id_arg,
+        help="Token ID (bk_...); a full bearer token is accepted and split",
+    )
 
     # set-limit
     p_set = sub.add_parser("set-limit", help="Update token limits")
-    p_set.add_argument("token_id", help="Token ID (bk_...)")
+    p_set.add_argument(
+        "token_id",
+        type=token_id_arg,
+        help="Token ID (bk_...); a full bearer token is accepted and split",
+    )
     p_set.add_argument("--budget", type=float, help="Monthly USD budget")
     p_set.add_argument("--rps", type=int, help="Requests per second cap")
     p_set.add_argument(
@@ -423,7 +458,11 @@ def build_parser():
 
     # usage
     p_usage = sub.add_parser("usage", help="Show usage counters for a token")
-    p_usage.add_argument("token_id", help="Token ID (bk_...)")
+    p_usage.add_argument(
+        "token_id",
+        type=token_id_arg,
+        help="Token ID (bk_...); a full bearer token is accepted and split",
+    )
     p_usage.add_argument("--period", help="Billing period YYYY-MM (default: current month)")
 
     return parser
