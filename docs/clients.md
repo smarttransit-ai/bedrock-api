@@ -69,11 +69,7 @@ url = f"{API_URL}/model/{quote(MODEL_ID, safe='')}/converse"
 response = httpx.post(
     url,
     headers={"Authorization": f"Bearer {TOKEN}"},
-    json={
-        "messages": [
-            {"role": "user", "content": [{"text": "Hello!"}]}
-        ]
-    },
+    json={"messages": [{"role": "user", "content": [{"text": "Hello!"}]}]},
     timeout=30.0,
 )
 response.raise_for_status()
@@ -112,9 +108,7 @@ client.meta.events.register("before-send.bedrock-runtime.*", _add_bearer)
 
 response = client.converse(
     modelId="us.anthropic.claude-sonnet-4-6",
-    messages=[
-        {"role": "user", "content": [{"text": "Hello!"}]}
-    ],
+    messages=[{"role": "user", "content": [{"text": "Hello!"}]}],
 )
 print(response["output"]["message"]["content"][0]["text"])
 ```

@@ -195,15 +195,14 @@ No GSIs.
 
 ```python
 from datetime import datetime, timezone
+
 period = datetime.now(timezone.utc).strftime("%Y-%m")
 ```
 
 ### Quota check (T04 step 3)
 
 ```python
-usage = usage_table.get_item(
-    Key={"token_id": token_id, "period": period}
-).get("Item", {})
+usage = usage_table.get_item(Key={"token_id": token_id, "period": period}).get("Item", {})
 
 if "limit_monthly_requests" in row:
     limit = row["limit_monthly_requests"]
@@ -221,9 +220,7 @@ if "limit_monthly_usd_micros" in row:
 ```python
 usage_table.update_item(
     Key={"token_id": token_id, "period": period},
-    UpdateExpression=(
-        "ADD requests :r, input_tokens :i, output_tokens :o, usd_micros :u"
-    ),
+    UpdateExpression=("ADD requests :r, input_tokens :i, output_tokens :o, usd_micros :u"),
     ExpressionAttributeValues={
         ":r": 1,
         ":i": in_tokens,
@@ -277,9 +274,7 @@ if "limit_rps" in token_row:
     try:
         rate_limit_table.update_item(
             Key={"token_id": token_id, "window_second": now_sec},
-            UpdateExpression=(
-                "ADD #c :one SET #ttl = if_not_exists(#ttl, :exp)"
-            ),
+            UpdateExpression=("ADD #c :one SET #ttl = if_not_exists(#ttl, :exp)"),
             # attribute_not_exists(#c) passes when the second-bucket item is
             # brand-new; subsequent requests in the same second use #c < :limit
             ConditionExpression="attribute_not_exists(#c) OR #c < :limit",
