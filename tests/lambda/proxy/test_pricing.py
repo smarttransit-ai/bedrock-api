@@ -363,3 +363,71 @@ def test_mantle_family_priced_and_not_region_derived():
         assert DEFAULT_PRICING[mid]["on_demand"]["input_usd_micros_per_1k"] < fallback_input
     # mantle does not support geo/global inference profiles — no phantom regional IDs.
     assert not [m for m in DEFAULT_PRICING if m.startswith(("us.mantle/", "global.mantle/"))]
+
+
+# ---------------------------------------------------------------------------
+# The mantle route feeding compute_cost: the whole point of the fix is what the
+# request COSTS, so assert dollars, not just the intermediate usage dict.
+# ---------------------------------------------------------------------------
+
+
+def _mantle_cost(raw_usage: dict) -> tuple[int, int]:
+    """Return (billable_input_tokens, usd_micros) for a Responses-shaped usage payload."""
+    from bedrock import normalize_usage
+    from mantle import USAGE_KEY_MAP, _flatten_usage, _to_exclusive_input
+
+    usage = _to_exclusive_input(normalize_usage(_flatten_usage(raw_usage), USAGE_KEY_MAP))
+    total, _, _, _, _ = compute_cost(
+        model_id="luna",
+        pricing_mode="on_demand",
+        input_tokens=usage["input_tokens"],
+        output_tokens=usage["output_tokens"],
+        cache_read_input_tokens=usage["cache_read_input_tokens"],
+        cache_write_input_tokens=usage["cache_write_input_tokens"],
+    )
+    return usage["input_tokens"], total
+
+
+def test_a_cached_responses_request_costs_less_than_an_uncached_one(pricing_bucket):
+    """Luna's real shape: 3090 of 3092 input tokens cached on the second identical call.
+
+    Before the fix both calls billed all 3092 tokens at the full input rate, so caching
+    made requests MORE expensive. Rates below are Luna's published per-token prices scaled
+    to micros-per-1k.
+    """
+    _set_live(
+        {
+            "luna": {
+                "on_demand": {
+                    "input_usd_micros_per_1k": 1100,
+                    "output_usd_micros_per_1k": 6600,
+                    "cache_read_input_usd_micros_per_1k": 110,
+                    "cache_write_input_usd_micros_per_1k": 1375,
+                }
+            }
+        }
+    )
+    cold_in, cold_cost = _mantle_cost(
+        {
+            "input_tokens": 3092,
+            "input_tokens_details": {"cache_write_tokens": 3090, "cached_tokens": 0},
+            "output_tokens": 5,
+        }
+    )
+    warm_in, warm_cost = _mantle_cost(
+        {
+            "input_tokens": 3092,
+            "input_tokens_details": {"cache_write_tokens": 0, "cached_tokens": 3090},
+            "output_tokens": 5,
+        }
+    )
+
+    # Only two tokens are ever new; the rest is cache traffic.
+    assert cold_in == 2 and warm_in == 2
+
+    # The property that was inverted: a hit must be cheaper than a miss.
+    assert warm_cost < cold_cost
+
+    # And the hit must be far cheaper than billing all 3092 at the full input rate would be.
+    naive_full_rate = (3092 * 1100) // 1000
+    assert warm_cost < naive_full_rate

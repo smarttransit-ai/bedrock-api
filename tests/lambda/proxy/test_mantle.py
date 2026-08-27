@@ -244,7 +244,10 @@ def test_stream_relays_event_lines_verbatim_and_harvests_usage():
     assert "event: response.output_text.delta\n" in relayed
     assert "event: response.completed\n" in relayed
     assert relayed.count("\n\n") == 2  # one frame terminator per event
-    assert usage_out["input_tokens"] == 12
+    # 9, not the 12 the payload reports: input_tokens is inclusive of cached_tokens on the
+    # Responses API, and billable input is the remainder. The streaming path must apply the
+    # same exclusion as the non-streaming one or usage differs by transport.
+    assert usage_out["input_tokens"] == 9
     assert usage_out["output_tokens"] == 100
     assert usage_out["cache_read_input_tokens"] == 3
     assert usage_out["reasoning_tokens"] == 80  # logged, not billed
@@ -345,3 +348,67 @@ def test_stream_ignores_malformed_data_lines():
     relayed = "".join(iter_responses_sse(resp, usage_out))
     assert "data: not-json" in relayed  # relayed verbatim, not dropped
     assert usage_out["output_tokens"] == 100
+
+# ---------------------------------------------------------------------------
+# Cached tokens are a SUBSET of input_tokens on the Responses API (issue: cache
+# hits cost more than misses). Numbers below are from the live endpoint.
+# ---------------------------------------------------------------------------
+
+# Same request sent twice. input_tokens is identical; only the details flip.
+COLD_CALL = {
+    "input_tokens": 3092,
+    "input_tokens_details": {"cache_write_tokens": 3090, "cached_tokens": 0},
+    "output_tokens": 5,
+}
+WARM_CALL = {
+    "input_tokens": 3092,
+    "input_tokens_details": {"cache_write_tokens": 0, "cached_tokens": 3090},
+    "output_tokens": 5,
+}
+
+
+def test_warm_call_bills_only_the_uncached_remainder():
+    """The regression: 3092 tokens billed at full rate when only 2 were new."""
+    client = _client(_ok({"usage": WARM_CALL}))
+    _, usage = forward_responses(client, "openai.gpt-5.6-luna", {"input": "hi"})
+
+    assert usage["cache_read_input_tokens"] == 3090
+    assert usage["input_tokens"] == 2, "cached tokens must not also be billed as input"
+
+
+def test_cold_call_bills_only_the_unwritten_remainder():
+    client = _client(_ok({"usage": COLD_CALL}))
+    _, usage = forward_responses(client, "openai.gpt-5.6-luna", {"input": "hi"})
+
+    assert usage["cache_write_input_tokens"] == 3090
+    assert usage["input_tokens"] == 2
+
+
+def test_a_cache_hit_is_cheaper_than_a_miss():
+    """The property that was inverted: caching must reduce cost, never raise it.
+
+    Asserted on the components rather than a dollar figure so it does not break when the
+    price table moves.
+    """
+    cold_client = _client(_ok({"usage": COLD_CALL}))
+    warm_client = _client(_ok({"usage": WARM_CALL}))
+    _, cold = forward_responses(cold_client, "openai.gpt-5.6-luna", {"input": "hi"})
+    _, warm = forward_responses(warm_client, "openai.gpt-5.6-luna", {"input": "hi"})
+
+    # Cache reads are billed well below cache writes on every model in the table, and the
+    # billable input is identical, so the warm call must be strictly cheaper.
+    assert warm["input_tokens"] == cold["input_tokens"]
+    assert warm["cache_read_input_tokens"] == cold["cache_write_input_tokens"]
+    assert warm["cache_write_input_tokens"] == 0
+
+
+def test_exclusive_shape_is_not_double_subtracted():
+    """A provider reporting the Converse convention must not go negative."""
+    usage = {
+        "input_tokens": 10,
+        "input_tokens_details": {"cached_tokens": 40, "cache_write_tokens": 25},
+        "output_tokens": 7,
+    }
+    client = _client(_ok({"usage": usage}))
+    _, parsed = forward_responses(client, "openai.gpt-5.6-luna", {"input": "hi"})
+    assert parsed["input_tokens"] == 0
