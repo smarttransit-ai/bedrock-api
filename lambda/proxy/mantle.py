@@ -103,12 +103,45 @@ def _flatten_usage(usage: dict | None) -> dict:
 # Responses usage → our canonical names. reasoning_tokens is deliberately absent: it is a
 # SUBSET of output_tokens (a breakdown, not an addend), so output_tokens already bills it.
 # Adding it as a component would double-charge the reasoning portion. It is logged, not billed.
+#
+# cached_tokens and cache_write_tokens are billing dimensions, but they are subsets of
+# input_tokens in exactly the same way — see _to_exclusive_input below, which removes them
+# from the billable input so compute_cost's four independent components do not overlap.
 USAGE_KEY_MAP = {
     "input_tokens": "input_tokens",
     "output_tokens": "output_tokens",
     "cache_read_input_tokens": "cached_tokens",
     "cache_write_input_tokens": "cache_write_tokens",
 }
+
+
+def _to_exclusive_input(usage: dict[str, int]) -> dict[str, int]:
+    """Make input_tokens exclusive of the cache counters, as Converse already reports it.
+
+    The two upstreams disagree, and compute_cost only works for one of them:
+
+        Converse  inputTokens   EXCLUDES cacheReadInputTokens / cacheWriteInputTokens
+        Responses input_tokens  INCLUDES cached_tokens / cache_write_tokens
+
+    compute_cost sums input, cache-read and cache-write as four independent components. Fed
+    the Responses shape it charges the cached portion twice — once at the full input rate and
+    again at the cache rate — so a cache HIT costs more than a miss. Verified against the live
+    endpoint: an identical request sent twice reported input_tokens 3092 both times, with
+    cache_write_tokens 3090 on the cold call and cached_tokens 3090 on the warm one. Only two
+    tokens were ever new, yet 3092 were billed at the full rate each time — a 10.9x overcharge
+    on the warm call, and the overcharge grows as caching gets better.
+
+    Normalising here rather than in compute_cost keeps a single cost formula, and makes the
+    stored counters mean the same thing for every route — which matters because the usage
+    table is also what `bedrock-api show` and GET /usage report.
+
+    Clamped at zero: a provider that ever reports the exclusive shape would otherwise produce
+    a negative billable input and silently credit the caller.
+    """
+    cached = usage.get("cache_read_input_tokens", 0)
+    written = usage.get("cache_write_input_tokens", 0)
+    usage["input_tokens"] = max(usage.get("input_tokens", 0) - cached - written, 0)
+    return usage
 
 
 def reasoning_tokens_of(usage: dict | None) -> int:
@@ -135,7 +168,7 @@ def forward_responses(client, model_id: str, body: dict) -> tuple[dict, dict[str
     if parsed is None:
         raise BedrockError("BEDROCK_ERROR", "bedrock-mantle returned non-JSON body", 502)
 
-    usage = normalize_usage(_flatten_usage(parsed.get("usage")), USAGE_KEY_MAP)
+    usage = _to_exclusive_input(normalize_usage(_flatten_usage(parsed.get("usage")), USAGE_KEY_MAP))
     return parsed, usage
 
 
@@ -186,7 +219,9 @@ def iter_responses_sse(resp, usage_out: dict) -> Generator[str, None, None]:
                 continue
             usage = (payload.get("response") or {}).get("usage")
             if usage:
-                usage_out.update(normalize_usage(_flatten_usage(usage), USAGE_KEY_MAP))
+                usage_out.update(
+                    _to_exclusive_input(normalize_usage(_flatten_usage(usage), USAGE_KEY_MAP))
+                )
                 usage_out["reasoning_tokens"] = reasoning_tokens_of(usage)
     finally:
         resp.close()
