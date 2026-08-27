@@ -7,13 +7,17 @@ would land in scrollback, CI logs and shell history as a working credential.
 """
 
 from bedrock_api.cli import token_id_arg
+
 from tests.cli.conftest import make_active_token
 
 SECRET = "4b97db5aa91cf4577458408189d34bfd182d1289cfc6ebaccd27807ccec9a221"
 
 
+TOKEN_ID = "bk_9640fae28ddacd7f7bd8c3b6f651beef"
+
+
 def test_plain_token_id_passes_through():
-    assert token_id_arg("bk_9640fae28ddacd7f7bd8c3b6f651beef") == "bk_9640fae28ddacd7f7bd8c3b6f651beef"
+    assert token_id_arg(TOKEN_ID) == TOKEN_ID
 
 
 def test_full_bearer_is_split_to_the_id(capsys):

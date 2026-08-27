@@ -349,6 +349,7 @@ def test_stream_ignores_malformed_data_lines():
     assert "data: not-json" in relayed  # relayed verbatim, not dropped
     assert usage_out["output_tokens"] == 100
 
+
 # ---------------------------------------------------------------------------
 # Cached tokens are a SUBSET of input_tokens on the Responses API (issue: cache
 # hits cost more than misses). Numbers below are from the live endpoint.
