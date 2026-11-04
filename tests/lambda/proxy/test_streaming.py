@@ -23,7 +23,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError, ParamValidationError
-from conftest import DEFAULT_MODEL, ENCODED_MODEL, _make_token
+from conftest import (
+    DEFAULT_MODEL,
+    ENCODED_MODEL,
+    GPT_OSS_ENCODED,
+    GPT_OSS_FLEX_USD_MICROS,
+    _make_token,
+    usage_row,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,6 +39,22 @@ from conftest import DEFAULT_MODEL, ENCODED_MODEL, _make_token
 
 def _current_period() -> str:
     return datetime.now(UTC).strftime("%Y-%m")
+
+
+def _preflight(token_id: str, usage_table):
+    from app import PreflightResult
+
+    return PreflightResult(
+        token_id=token_id,
+        token_row={},
+        period=_current_period(),
+        body={},
+        model_id=DEFAULT_MODEL,
+        pricing_model_id=DEFAULT_MODEL,
+        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL},
+        start_ms=time.monotonic() * 1000,
+        usage_table=usage_table,
+    )
 
 
 def _converse_stream_path() -> str:
@@ -763,7 +786,7 @@ def test_invoke_stream_output_cap(test_token):
 
     captured = {}
 
-    def _fake_open_invoke_stream(client, model_id, body):
+    def _fake_open_invoke_stream(client, model_id, body, service_tier=None):
         captured["body"] = body
         chunks = _invoke_stream_events(in_tokens=5, out_tokens=3)
         return {"body": iter([{"chunk": {"bytes": b}} for b in chunks])}
@@ -793,7 +816,7 @@ def test_invoke_stream_output_cap(test_token):
 
 
 def test_converse_stream_disconnect_no_usage_write():
-    """Generator closed before metadata event → _post_flight_write skips write (usage_out empty)."""
+    """Generator closed before metadata event → _bill skips write (no token keys)."""
     from bedrock import iter_converse_stream
 
     events = [
@@ -813,29 +836,14 @@ def test_converse_stream_disconnect_no_usage_write():
 
 
 def test_converse_stream_disconnect_with_partial_usage_writes(test_token):
-    """Generator closed after metadata → _post_flight_write writes partial usage."""
-    from app import _post_flight_write
+    """Generator closed after metadata → _bill writes partial usage."""
+    from app import _bill
 
     token_id, bearer_token, tables = test_token
     _, usage_table, _ = tables
 
-    # Build a minimal preflight result substitute
-    from datetime import UTC, datetime
-
-    from app import PreflightResult
-
-    period = datetime.now(UTC).strftime("%Y-%m")
-    pf = PreflightResult(
-        token_id=token_id,
-        token_row={},
-        period=period,
-        body={},
-        model_id=DEFAULT_MODEL,
-        pricing_model_id=DEFAULT_MODEL,
-        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL},
-        start_ms=time.monotonic() * 1000,
-        usage_table=usage_table,
-    )
+    period = _current_period()
+    pf = _preflight(token_id, usage_table)
 
     # Simulate usage populated before disconnect
     usage_out = {
@@ -846,7 +854,7 @@ def test_converse_stream_disconnect_with_partial_usage_writes(test_token):
     }
     log_ctx = dict(pf.log_ctx)
 
-    _post_flight_write(usage_out, pf, log_ctx)
+    _bill(usage_out, pf, log_ctx, completed=False)
 
     usage = usage_table.get_item(Key={"token_id": token_id, "period": period}).get("Item", {})
     assert int(usage.get("input_tokens", 0)) == 8
@@ -858,9 +866,9 @@ def test_invoke_stream_disconnect_partial_state():
 
     Generator state after close: input_tokens is set (from message_start) but
     output_tokens is absent.  This documents the partial-usage state; whether
-    billing occurs for input-only disconnects is a policy decision — the current
-    _post_flight_write guard is ``if not usage_out`` (empty dict), so a partial
-    disconnect DOES bill (usage_out is non-empty with input_tokens).
+    billing occurs for input-only disconnects is a policy decision — _bill's token
+    gate skips only when NO token key is present, so a partial disconnect DOES bill
+    (usage_out holds input_tokens).
     """
     from bedrock import iter_invoke_stream
 
@@ -881,38 +889,26 @@ def test_invoke_stream_disconnect_partial_state():
     # input_tokens was populated but output_tokens wasn't
     assert usage_out.get("input_tokens") == 5
     assert "output_tokens" not in usage_out
-    # usage_out is non-empty, so _post_flight_write will attempt to bill
-    assert usage_out  # non-empty → billing path taken
+    # a token key is present, so _bill's token gate lets it through to billing
+    assert "input_tokens" in usage_out
 
 
 # ===========================================================================
 # Section 7b: _sse_stream wrapper-level disconnect tests (R6)
 # Tests drive the real _sse_stream helper directly (not through HTTP) so the
-# real finally:→_post_flight_write path on disconnect is covered.
+# real finally:→_bill path on disconnect is covered.
 # ===========================================================================
 
 
 def test_sse_stream_disconnect_empty_usage_no_write(test_token):
-    """_sse_stream closed before any usage events → _post_flight_write skips write (R6-i)."""
+    """_sse_stream closed before any usage events → _bill skips write (R6-i)."""
     from app import _sse_stream
 
     token_id, bearer_token, tables = test_token
     _, usage_table, _ = tables
 
-    from app import PreflightResult
-
     period = _current_period()
-    pf = PreflightResult(
-        token_id=token_id,
-        token_row={},
-        period=period,
-        body={},
-        model_id=DEFAULT_MODEL,
-        pricing_model_id=DEFAULT_MODEL,
-        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL},
-        start_ms=time.monotonic() * 1000,
-        usage_table=usage_table,
-    )
+    pf = _preflight(token_id, usage_table)
     log_ctx = dict(pf.log_ctx)
     usage_out: dict = {}
 
@@ -926,33 +922,21 @@ def test_sse_stream_disconnect_empty_usage_no_write(test_token):
     next(gen)
     gen.close()
 
-    # usage_out is still empty, so _post_flight_write should NOT write
+    # usage_out holds no token keys, so _bill should NOT write
     usage = usage_table.get_item(Key={"token_id": token_id, "period": period}).get("Item", {})
     assert not usage, f"Expected no usage write, got: {usage}"
 
 
 def test_sse_stream_disconnect_with_usage_writes(test_token):
-    """_sse_stream closed after usage is populated → _post_flight_write writes usage (R6-ii)."""
+    """_sse_stream closed after usage is populated → _bill writes usage (R6-ii)."""
     from app import _sse_stream
     from bedrock import iter_converse_stream
 
     token_id, bearer_token, tables = test_token
     _, usage_table, _ = tables
 
-    from app import PreflightResult
-
     period = _current_period()
-    pf = PreflightResult(
-        token_id=token_id,
-        token_row={},
-        period=period,
-        body={},
-        model_id=DEFAULT_MODEL,
-        pricing_model_id=DEFAULT_MODEL,
-        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL},
-        start_ms=time.monotonic() * 1000,
-        usage_table=usage_table,
-    )
+    pf = _preflight(token_id, usage_table)
     log_ctx = dict(pf.log_ctx)
     usage_out: dict = {}
 
@@ -965,7 +949,7 @@ def test_sse_stream_disconnect_with_usage_writes(test_token):
     frames = list(gen)
     assert frames  # should have yielded some SSE frames
 
-    # _post_flight_write should have written usage
+    # _bill should have written usage
     usage = usage_table.get_item(Key={"token_id": token_id, "period": period}).get("Item", {})
     assert int(usage.get("input_tokens", 0)) == 11
     assert int(usage.get("output_tokens", 0)) == 4
@@ -1120,3 +1104,116 @@ def test_iter_invoke_stream_fallback_does_not_overwrite_primary():
     # Primary values win
     assert usage_out["input_tokens"] == 5
     assert usage_out["output_tokens"] == 3
+
+
+# ===========================================================================
+# Section 9: service tiers + the _bill token gate (issue #15)
+# ===========================================================================
+
+
+def test_invoke_stream_forwards_tier_and_bills_flex(test_token):
+    from bedrock import TIER_HEADER
+
+    final_chunk = {
+        "object": "chat.completion.chunk",
+        "choices": [{"delta": {}, "finish_reason": "stop"}],
+        "amazon-bedrock-invocationMetrics": {"inputTokenCount": 1000, "outputTokenCount": 1000},
+    }
+    mock_client = MagicMock()
+    mock_client.invoke_model_with_response_stream.return_value = {
+        "body": iter([{"chunk": {"bytes": json.dumps(final_chunk).encode()}}]),
+        "serviceTier": "flex",
+    }
+    http_client, token_id, bearer_token, tables = _make_app_client_with_mock(
+        test_token, mock_client
+    )
+
+    with http_client as client:
+        resp = client.post(
+            f"/model/{GPT_OSS_ENCODED}/invoke-with-response-stream",
+            json={"messages": [{"role": "user", "content": "Hi"}]},
+            headers={**_auth_headers(bearer_token), TIER_HEADER: "flex"},
+        )
+
+    assert resp.status_code == 200
+    call = mock_client.invoke_model_with_response_stream.call_args
+    assert call.kwargs["serviceTier"] == "flex"
+    assert int(usage_row(tables[1], token_id)["usd_micros"]) == GPT_OSS_FLEX_USD_MICROS
+
+
+def test_converse_stream_bills_metadata_tier(test_token):
+    events = _converse_stream_events(in_tokens=1000, out_tokens=1000)
+    events[-1]["metadata"]["serviceTier"] = {"type": "flex"}
+    mock_client = _make_converse_stream_mock(events)
+    http_client, token_id, bearer_token, tables = _make_app_client_with_mock(
+        test_token, mock_client
+    )
+
+    with http_client as client:
+        resp = client.post(
+            f"/model/{GPT_OSS_ENCODED}/converse-stream",
+            json=_converse_body(),
+            headers=_auth_headers(bearer_token),
+        )
+
+    assert resp.status_code == 200
+    assert int(usage_row(tables[1], token_id)["usd_micros"]) == GPT_OSS_FLEX_USD_MICROS
+
+
+def test_bill_tier_only_usage_writes_nothing(test_token):
+    from app import _bill
+
+    token_id, _, tables = test_token
+    pf = _preflight(token_id, tables[1])
+    _bill({"service_tier": "flex"}, pf, dict(pf.log_ctx), completed=False)
+    assert usage_row(tables[1], token_id) == {}
+
+
+def test_sse_stream_input_only_usage_writes_row(test_token):
+    from app import _sse_stream
+
+    token_id, _, tables = test_token
+    pf = _preflight(token_id, tables[1])
+    usage_out = {"service_tier": "standard", "input_tokens": 9}
+    list(_sse_stream(iter([{"x": 1}]), usage_out, pf, dict(pf.log_ctx)))
+    row = usage_row(tables[1], token_id)
+    assert int(row["input_tokens"]) == 9
+    assert int(row["output_tokens"]) == 0
+
+
+def test_completed_stream_without_tokens_warns_but_disconnect_is_silent(test_token, caplog):
+    from app import _sse_stream
+
+    token_id, _, tables = test_token
+    pf = _preflight(token_id, tables[1])
+
+    # Seeded with a tier, exactly as _run_streaming does: a tier alone is not usage.
+    with caplog.at_level("WARNING"):
+        gen = _sse_stream(iter([{"x": 1}, {"y": 2}]), {"service_tier": "standard"}, pf, {})
+        next(gen)
+        gen.close()  # client disconnect: no warning
+    assert not [r for r in caplog.records if "usage_parse_warning" in r.message]
+
+    with caplog.at_level("WARNING"):
+        list(_sse_stream(iter([{"x": 1}]), {"service_tier": "standard"}, pf, dict(pf.log_ctx)))
+    (warning,) = [json.loads(r.message) for r in caplog.records if "usage_parse" in r.message]
+    assert warning["model_id"] == DEFAULT_MODEL
+    assert usage_row(tables[1], token_id) == {}
+
+
+def test_stream_error_without_tokens_stays_silent_in_the_gate(test_token, caplog):
+    """A mid-stream error already logs stream_error; the token gate must not add a warning."""
+    from app import _sse_stream
+    from bedrock import BedrockError
+
+    token_id, _, tables = test_token
+    pf = _preflight(token_id, tables[1])
+
+    def _failing():
+        yield {"x": 1}
+        raise BedrockError("BEDROCK_STREAM_ERROR", "boom", 502)
+
+    with caplog.at_level("WARNING"):
+        list(_sse_stream(_failing(), {"service_tier": "standard"}, pf, dict(pf.log_ctx)))
+    assert any("stream_error" in r.message for r in caplog.records)
+    assert not any("usage_parse_warning" in r.message for r in caplog.records)

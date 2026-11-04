@@ -8,6 +8,7 @@ import hashlib
 import os
 import secrets
 import sys
+from datetime import UTC, datetime
 
 # Add lambda/proxy to sys.path so flat imports (from auth import ...) work in tests.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../lambda/proxy"))
@@ -45,6 +46,11 @@ DEFAULT_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 # URL-encoded form: colons in path segments must be percent-encoded (%3A).
 # FastAPI/Starlette decodes %3A → ':' before it reaches the route handler.
 ENCODED_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1%3A0"
+# A catalog entry with Flex and Priority rates, for the service-tier tests. 1000 in + 1000 out
+# at its Flex rates ($0.075/$0.30 per 1M; Standard $0.15/$0.60) — the same on its mantle/ twin.
+GPT_OSS_MODEL = "openai.gpt-oss-120b-1:0"
+GPT_OSS_ENCODED = "openai.gpt-oss-120b-1%3A0"
+GPT_OSS_FLEX_USD_MICROS = 75 + 300
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +204,12 @@ def _make_token() -> tuple[str, str, str]:
     secret_hash = f"{salt.hex()}:{digest}"
     bearer_token = f"{token_id}.{secret}"
     return token_id, bearer_token, secret_hash
+
+
+def usage_row(usage_table, token_id: str) -> dict:
+    """Return the token's usage row for the current period ({} when nothing was written)."""
+    key = {"token_id": token_id, "period": datetime.now(UTC).strftime("%Y-%m")}
+    return usage_table.get_item(Key=key).get("Item", {})
 
 
 def converse_response(

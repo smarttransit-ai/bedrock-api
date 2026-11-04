@@ -13,8 +13,17 @@ import logging
 import time
 from datetime import UTC, datetime
 
+from bedrock import TIER_HEADER
 from botocore.exceptions import ParamValidationError
-from conftest import DEFAULT_MODEL, ENCODED_MODEL, converse_response
+from conftest import (
+    DEFAULT_MODEL,
+    ENCODED_MODEL,
+    GPT_OSS_ENCODED,
+    GPT_OSS_FLEX_USD_MICROS,
+    GPT_OSS_MODEL,
+    converse_response,
+    usage_row,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -501,7 +510,7 @@ def test_output_cap_invoke(app_client):
 
     captured = {}
 
-    def _fake_forward_invoke(client, model_id, body):
+    def _fake_forward_invoke(client, model_id, body, service_tier=None):
         captured["body"] = body
         return {"content": [{"type": "text", "text": "Hi"}], "stop_reason": "end_turn"}, {
             "input_tokens": 10,
@@ -654,3 +663,106 @@ def test_percent_encoded_colon_decoded_for_bedrock(app_client):
         )
 
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Service tiers (issue #15) — billed at the tier Bedrock reports
+# ---------------------------------------------------------------------------
+
+
+def _log_events(caplog, event: str) -> list[dict]:
+    payloads = [json.loads(r.message) for r in caplog.records if r.message.startswith("{")]
+    return [p for p in payloads if p.get("event") == event]
+
+
+def test_flex_converse_bills_flex_rate(app_client, caplog):
+    http_client, token_id, bearer_token, tables, stubber = app_client
+    body = {**_converse_body(), "serviceTier": {"type": "flex"}}
+    stubber.add_response(
+        "converse",
+        {**converse_response(in_tokens=1000, out_tokens=1000), "serviceTier": {"type": "flex"}},
+        expected_params={"modelId": GPT_OSS_MODEL, **body},
+    )
+
+    with stubber, caplog.at_level(logging.INFO):
+        resp = http_client.post(
+            f"/model/{GPT_OSS_ENCODED}/converse",
+            json=body,
+            headers=_auth_headers(bearer_token),
+        )
+
+    assert resp.status_code == 200
+    assert TIER_HEADER not in resp.headers  # Converse reports its tier in the body
+    (audit,) = _log_events(caplog, "pricing_audit")
+    assert audit["service_tier"] == "flex"  # the field the metric filters match on
+    assert audit["fallback_applied"] is False
+    assert int(usage_row(tables[1], token_id)["usd_micros"]) == GPT_OSS_FLEX_USD_MICROS
+
+
+def test_invoke_forwards_tier_header_and_bills_the_reported_tier(app_client, caplog):
+    """Asked for Priority, served Flex: forward the request's tier, bill and echo Bedrock's.
+
+    gpt-oss reports usage only in the count headers; it billed $0 before issue #15.
+    """
+    http_client, token_id, bearer_token, tables, stubber = app_client
+    body = {"messages": [{"role": "user", "content": "Hello"}]}
+    gpt_oss_body = {"choices": [], "usage": {"prompt_tokens": 1000, "completion_tokens": 1000}}
+    stubber.add_response(
+        "invoke_model",
+        {
+            "contentType": "application/json",
+            "body": io.BytesIO(json.dumps(gpt_oss_body).encode()),
+            "serviceTier": "flex",
+            "ResponseMetadata": {
+                "HTTPHeaders": {
+                    "x-amzn-bedrock-input-token-count": "1000",
+                    "x-amzn-bedrock-output-token-count": "1000",
+                }
+            },
+        },
+        expected_params={
+            "modelId": GPT_OSS_MODEL,
+            "body": json.dumps(body),
+            "contentType": "application/json",
+            "accept": "application/json",
+            "serviceTier": "priority",
+        },
+    )
+
+    with stubber, caplog.at_level(logging.INFO):
+        resp = http_client.post(
+            f"/model/{GPT_OSS_ENCODED}/invoke",
+            json=body,
+            headers={**_auth_headers(bearer_token), TIER_HEADER: "priority"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.headers[TIER_HEADER] == "flex"
+    # The raw tier drives only the echo; service_tier already carries it in the logs.
+    assert not any("raw_service_tier" in r.message for r in caplog.records)
+    assert int(usage_row(tables[1], token_id)["usd_micros"]) == GPT_OSS_FLEX_USD_MICROS
+
+
+def test_invoke_without_response_tier_bills_standard_with_no_tier_header(app_client, caplog):
+    http_client, token_id, bearer_token, tables, stubber = app_client
+    stubber.add_response(
+        "invoke_model",
+        _invoke_response(),
+        # No tier header on the request → no serviceTier sent to Bedrock.
+        expected_params={
+            "modelId": DEFAULT_MODEL,
+            "body": json.dumps(_invoke_body()),
+            "contentType": "application/json",
+            "accept": "application/json",
+        },
+    )
+
+    with stubber, caplog.at_level(logging.INFO):
+        resp = http_client.post(
+            _invoke_path(), json=_invoke_body(), headers=_auth_headers(bearer_token)
+        )
+
+    assert resp.status_code == 200
+    assert TIER_HEADER not in resp.headers
+    (audit,) = _log_events(caplog, "pricing_audit")
+    assert audit["service_tier"] == "standard"

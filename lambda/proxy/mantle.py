@@ -23,6 +23,7 @@ from bedrock import BedrockError, normalize_usage
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.exceptions import NoCredentialsError
+from pricing_catalog import normalize_service_tier
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,11 @@ _ERROR_STATUS = {
     "rate_limit_error": ("THROTTLED", 429),
 }
 _DEFAULT_ERROR = ("BEDROCK_ERROR", 502)
+
+# Every terminal Responses stream event: each carries the final response, and its usage when
+# tokens were consumed — a stream cut by the proxy's own max_output_tokens cap ends
+# ``response.incomplete`` with usage, and must still bill.
+_TERMINAL_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed"})
 
 
 def sign_headers(client, body: bytes, path: str = RESPONSES_PATH) -> dict[str, str]:
@@ -156,7 +162,9 @@ def forward_responses(
 ) -> tuple[dict, dict[str, int | str | None]]:
     """POST /openai/v1/responses (non-streaming); return (response_body, normalized_usage).
 
-    Mirrors bedrock.forward_converse's contract so the shared route body is unchanged.
+    Mirrors bedrock.forward_converse's contract so the shared route body is unchanged. The
+    usage dict also carries the reported ``service_tier`` (``default``/``auto`` mean
+    Standard) and ``reasoning_tokens`` (logged, never billed).
     """
     payload = json.dumps({**body, "model": model_id, "stream": False}).encode()
     try:
@@ -171,6 +179,8 @@ def forward_responses(
         raise BedrockError("BEDROCK_ERROR", "bedrock-mantle returned non-JSON body", 502)
 
     usage = _to_exclusive_input(normalize_usage(_flatten_usage(parsed.get("usage")), USAGE_KEY_MAP))
+    usage["service_tier"] = normalize_service_tier(parsed.get("service_tier"))
+    usage["reasoning_tokens"] = reasoning_tokens_of(parsed.get("usage"))
     return parsed, usage
 
 
@@ -207,24 +217,28 @@ def iter_responses_sse(resp, usage_out: dict) -> Generator[str, None, None]:
     dispatch on that type — reformatting through a data-only emitter would strip the event
     types and break compliant SDKs. Verbatim relay is also cheaper: no parse/reserialize.
 
-    Usage arrives on the terminal ``response.completed`` event (``data.response.usage``).
+    Usage and the service tier arrive on the terminal event (any of _TERMINAL_EVENTS, under
+    ``data.response``); its type is recorded as ``terminal_event``. A terminal event without
+    usage (e.g. a ``response.failed`` before any tokens) leaves no token keys, so nothing bills.
     Closing the response here is mandatory: unlike boto3's GC-managed EventStream, an httpx
     streaming response holds its connection until explicitly closed.
     """
     try:
         for line in resp.iter_lines():
+            # Harvest BEFORE relaying: a client that disconnects right after the terminal
+            # event closes this generator at the yield, and its usage must already be read.
+            payload = _safe_json(line[len("data:") :].strip()) if line.startswith("data:") else None
+            if payload and payload.get("type") in _TERMINAL_EVENTS:
+                response = payload.get("response") or {}
+                usage_out["service_tier"] = normalize_service_tier(response.get("service_tier"))
+                usage_out["terminal_event"] = payload["type"]
+                usage = response.get("usage")
+                if usage:
+                    usage_out.update(
+                        _to_exclusive_input(normalize_usage(_flatten_usage(usage), USAGE_KEY_MAP))
+                    )
+                    usage_out["reasoning_tokens"] = reasoning_tokens_of(usage)
             yield f"{line}\n"
-            if not line.startswith("data:"):
-                continue
-            payload = _safe_json(line[len("data:") :].strip())
-            if not payload or payload.get("type") != "response.completed":
-                continue
-            usage = (payload.get("response") or {}).get("usage")
-            if usage:
-                usage_out.update(
-                    _to_exclusive_input(normalize_usage(_flatten_usage(usage), USAGE_KEY_MAP))
-                )
-                usage_out["reasoning_tokens"] = reasoning_tokens_of(usage)
     finally:
         resp.close()
 
