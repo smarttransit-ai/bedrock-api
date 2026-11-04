@@ -52,9 +52,12 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 
 from auth import AuthError, parse_bearer_token_from_request, verify_secret
 from bedrock import (
+    TIER_HEADER,
+    TOKEN_KEYS,
     BedrockError,
     _sse_json_default,
     apply_output_cap,
@@ -81,10 +84,9 @@ from mantle import (
     forward_responses,
     iter_responses_sse,
     open_responses_stream,
-    reasoning_tokens_of,
 )
 from pricing import compute_cost, invalidate_cache
-from pricing_catalog import MANTLE_NAMESPACE
+from pricing_catalog import MANTLE_NAMESPACE, normalize_service_tier
 from pricing_refresh import refresh_pricing
 from pricing_store import load_live_meta
 from routes import ROUTE_CONVERSE, ROUTE_INVOKE, ROUTE_RESPONSES
@@ -123,7 +125,6 @@ class PreflightResult:
     # every biller (streaming and non-streaming) is correct by construction: billing from
     # the bare wire ID would miss the catalog and silently charge the Opus-tier fallback.
     pricing_model_id: str
-    pricing_mode: str
     log_ctx: dict
     start_ms: float
     usage_table: object  # DynamoDB Table reference for post-flight write
@@ -139,13 +140,6 @@ def _allowed_models_default() -> list[str]:
     return [m.strip() for m in raw.split(",") if m.strip()]
 
 
-def _resolve_pricing_mode(token_row: dict) -> str:
-    mode = token_row.get("pricing_mode", "on_demand")
-    if mode in ("on_demand", "batch"):
-        return mode
-    raise BedrockError("INTERNAL_ERROR", f"Invalid pricing_mode {mode!r}", 500)
-
-
 def _error_json(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
@@ -159,15 +153,9 @@ def _handle_known_error(exc, log_ctx: dict, start_ms: float) -> JSONResponse:
                 "event": "pricing_audit",
                 "fallback_applied": False,
                 "fallback_dimensions": [],
-                "pricing_mode": log_ctx.get("pricing_mode", "on_demand"),
                 "component_micros": {},
                 "usd_micros": log_ctx.get("usd_micros"),
-                "token_counters": {
-                    "input_tokens": log_ctx.get("input_tokens", 0),
-                    "output_tokens": log_ctx.get("output_tokens", 0),
-                    "cache_read_input_tokens": log_ctx.get("cache_read_input_tokens", 0),
-                    "cache_write_input_tokens": log_ctx.get("cache_write_input_tokens", 0),
-                },
+                "token_counters": {k: log_ctx.get(k, 0) for k in TOKEN_KEYS},
                 "status": exc.status,
             }
         )
@@ -270,14 +258,6 @@ async def run_preflight(
     # body-carried model is gated exactly like a path-carried one.
     check_model_allowlist(model_id, token_row, _allowed_models_default())
 
-    raw_mode = token_row.get("pricing_mode", "on_demand")
-    if raw_mode not in ("on_demand", "batch"):
-        logger.warning(
-            json.dumps({**log_ctx, "event": "pricing_mode_invalid", "pricing_mode": raw_mode})
-        )
-    pricing_mode = _resolve_pricing_mode(token_row)
-    log_ctx["pricing_mode"] = pricing_mode
-
     return PreflightResult(
         token_id=token_id,
         token_row=token_row,
@@ -287,7 +267,6 @@ async def run_preflight(
         pricing_model_id=(
             f"{MANTLE_NAMESPACE}{model_id}" if route == ROUTE_RESPONSES else model_id
         ),
-        pricing_mode=pricing_mode,
         log_ctx=log_ctx,
         start_ms=start_ms,
         usage_table=usage_table,
@@ -323,36 +302,31 @@ async def health():
     return {"status": "ok"}
 
 
-def _bill_nonstreaming_response(
-    upstream_resp: dict,
-    usage: dict,
-    pf: PreflightResult,
-    log_ctx: dict,
-    start_ms: float,
-) -> JSONResponse:
-    """Bill a completed non-streaming call, emit the audit logs, return the response.
+# Usage-dict extras that are logged when an extractor reports them, but never billed
+# (reasoning_tokens are a subset of output_tokens, so billing them would charge twice).
+_LOGGED_EXTRAS = ("reasoning_tokens", "terminal_event")
 
-    Shared by the Bedrock (converse/invoke) and mantle (responses) non-streaming paths —
-    they differ only in transport, so billing and observability stay single-sourced.
+
+def _bill(usage: dict, pf: PreflightResult, log_ctx: dict) -> None:
+    """Bill a finished call and emit its audit logs. Never raises — errors are logged only.
+
+    The single billing tail for every route. ``usage`` is read-only. With no token counters
+    (a client disconnect, a usage-less ``response.failed``) nothing is written. The tier billed
+    is the one the upstream reported, Standard when it reported none.
 
     Billing keys off pf.pricing_model_id, never pf.model_id: on the responses route the
     catalog key is namespaced (mantle/<id>) and the bare wire ID would miss the catalog,
     silently charging the Opus-tier fallback.
     """
-    in_tok = usage["input_tokens"]
-    out_tok = usage["output_tokens"]
-    cache_read_tok = usage["cache_read_input_tokens"]
-    cache_write_tok = usage["cache_write_input_tokens"]
-    log_ctx.update(
-        input_tokens=in_tok,
-        output_tokens=out_tok,
-        cache_read_input_tokens=cache_read_tok,
-        cache_write_input_tokens=cache_write_tok,
-    )
+    if not any(k in usage for k in TOKEN_KEYS):
+        return
+    counts = {k: usage.get(k, 0) for k in TOKEN_KEYS}
+    tier = usage.get("service_tier", "standard")
+    log_ctx.update(counts, service_tier=tier)
+    log_ctx.update({k: usage[k] for k in _LOGGED_EXTRAS if k in usage})
 
     # The upstream call already succeeded and consumed tokens, so a billing failure must not
-    # turn into a 500 that tells the caller to retry — return their response and log the
-    # failure, matching the streaming path (_post_flight_write).
+    # turn into a 500 that tells the caller to retry — log it; the caller still responds.
     try:
         (
             usd_micros,
@@ -360,17 +334,10 @@ def _bill_nonstreaming_response(
             fallback_applied,
             fallback_dimensions,
             applied_rates,
-        ) = compute_cost(
-            model_id=pf.pricing_model_id,
-            pricing_mode=pf.pricing_mode,
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            cache_read_input_tokens=cache_read_tok,
-            cache_write_input_tokens=cache_write_tok,
-        )
+        ) = compute_cost(model_id=pf.pricing_model_id, service_tier=tier, **counts)
     except Exception as exc:
         logger.error(json.dumps({**log_ctx, "event": "billing_failed", "error": str(exc)}))
-        return JSONResponse(upstream_resp)
+        return
 
     log_ctx["usd_micros"] = usd_micros
     logger.info(
@@ -392,23 +359,22 @@ def _bill_nonstreaming_response(
         write_usage(
             pf.token_id,
             pf.period,
-            in_tok,
-            out_tok,
-            cache_read_tok,
-            cache_write_tok,
+            counts["input_tokens"],
+            counts["output_tokens"],
+            counts["cache_read_input_tokens"],
+            counts["cache_write_input_tokens"],
             usd_micros,
             pf.usage_table,
         )
     except Exception as exc:
         logger.error(json.dumps({**log_ctx, "event": "usage_write_failed", "error": str(exc)}))
 
-    latency_ms = int((time.monotonic() * 1000) - start_ms)
+    latency_ms = int((time.monotonic() * 1000) - pf.start_ms)
     logger.info(
         json.dumps(
             {**log_ctx, "event": "request_complete", "status": 200, "latency_ms": latency_ms}
         )
     )
-    return JSONResponse(upstream_resp)
 
 
 async def _run_nonstreaming(
@@ -424,7 +390,7 @@ async def _run_nonstreaming(
     The two routes differ only by route name and the Bedrock forward function;
     the pre-flight, output-cap, billing, and logging flow is identical.
     """
-    # Billing/logging tail is _bill_nonstreaming_response, shared with the responses route.
+    # Billing/logging tail is _bill, shared with every other route.
     start_ms = time.monotonic() * 1000
     log_ctx: dict = {}
 
@@ -444,7 +410,10 @@ async def _run_nonstreaming(
         # pf.model_id, not the model_id argument: the latter is None on the responses
         # route, where preflight resolves the model from the body.
         upstream_resp, usage = forward_fn(bedrock_client, pf.model_id, body)
-        return _bill_nonstreaming_response(upstream_resp, usage, pf, log_ctx, start_ms)
+        _bill(usage, pf, log_ctx)
+        # Echo Bedrock's reported tier, so a boto3 client fills its serviceTier output.
+        tier = usage.get("raw_service_tier")
+        return JSONResponse(upstream_resp, headers={TIER_HEADER: tier} if tier else None)
 
     except (AuthError, LimitError, BedrockError) as exc:
         return _handle_known_error(exc, log_ctx, start_ms)
@@ -477,8 +446,9 @@ async def invoke(
     bedrock_client=Depends(get_bedrock),
 ):
     """POST /model/{model_id}/invoke — non-streaming InvokeModel API proxy."""
+    forward_fn = partial(forward_invoke_model, service_tier=request.headers.get(TIER_HEADER))
     return await _run_nonstreaming(
-        model_id, request, tables, bedrock_client, ROUTE_INVOKE, forward_invoke_model
+        model_id, request, tables, bedrock_client, ROUTE_INVOKE, forward_fn
     )
 
 
@@ -630,112 +600,16 @@ async def admin_pricing_status(
 
 
 # ---------------------------------------------------------------------------
-# Streaming helpers
-# ---------------------------------------------------------------------------
-
-
-def _post_flight_write(usage_out: dict, pf: PreflightResult, log_ctx: dict) -> None:
-    """Write usage + emit billing logs after a streaming response completes.
-
-    Skips the write when usage_out is empty (client disconnect before any
-    usage events were received).  Never raises — errors are logged only.
-
-    Observability parity with non-streaming routes (R5):
-      - compute_cost failure → logs ``billing_failed`` and returns early
-      - pricing_audit always emitted after a successful compute
-      - write_usage failure → logs ``usage_write_failed`` (does not suppress request_complete)
-      - request_complete always emitted when usage was written
-    """
-    # O1: guard at top before reading token vars
-    if not usage_out:
-        # No usage data at all — skip billing write (e.g. client disconnect)
-        return
-
-    in_tok = usage_out.get("input_tokens", 0)
-    out_tok = usage_out.get("output_tokens", 0)
-    cache_read_tok = usage_out.get("cache_read_input_tokens", 0)
-    cache_write_tok = usage_out.get("cache_write_input_tokens", 0)
-
-    latency_ms = int((time.monotonic() * 1000) - pf.start_ms)
-    log_ctx.update(
-        input_tokens=in_tok,
-        output_tokens=out_tok,
-        cache_read_input_tokens=cache_read_tok,
-        cache_write_input_tokens=cache_write_tok,
-    )
-
-    # (a) compute_cost in its own try/except for distinct observability
-    try:
-        (
-            usd_micros,
-            component_micros,
-            fallback_applied,
-            fallback_dimensions,
-            applied_rates,
-        ) = compute_cost(
-            model_id=pf.pricing_model_id,
-            pricing_mode=pf.pricing_mode,
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            cache_read_input_tokens=cache_read_tok,
-            cache_write_input_tokens=cache_write_tok,
-        )
-    except Exception as exc:
-        logger.error(json.dumps({**log_ctx, "event": "billing_failed", "error": str(exc)}))
-        return
-
-    # (b) pricing_audit unconditional after successful compute
-    log_ctx["usd_micros"] = usd_micros
-    logger.info(
-        json.dumps(
-            {
-                **log_ctx,
-                "event": "pricing_audit",
-                "pricing_model_id": pf.pricing_model_id,
-                "component_micros": component_micros,
-                "applied_rates": applied_rates,
-                "fallback_applied": fallback_applied,
-                "fallback_dimensions": fallback_dimensions,
-                "status": 200,
-            }
-        )
-    )
-
-    # (c) write_usage in its own try/except — failure logs usage_write_failed but
-    #     does not suppress request_complete
-    try:
-        write_usage(
-            pf.token_id,
-            pf.period,
-            in_tok,
-            out_tok,
-            cache_read_tok,
-            cache_write_tok,
-            usd_micros,
-            pf.usage_table,
-        )
-    except Exception as exc:
-        logger.error(json.dumps({**log_ctx, "event": "usage_write_failed", "error": str(exc)}))
-
-    # (d) request_complete always emitted when usage_out was populated
-    logger.info(
-        json.dumps(
-            {**log_ctx, "event": "request_complete", "status": 200, "latency_ms": latency_ms}
-        )
-    )
-
-
-# ---------------------------------------------------------------------------
 # Streaming helper (R6: module-level so tests can drive it directly)
 # ---------------------------------------------------------------------------
 
 
 def _sse_stream(event_iter, usage_out: dict, pf: PreflightResult, log_ctx: dict):
-    """Generate SSE frames from an event iterator; run _post_flight_write in finally.
+    """Generate SSE frames from an event iterator; run _bill in finally.
 
     Factored out of the route _stream() closures (R6) so test code can drive
     the generator directly — partially iterate, call gen.close(), and assert
-    _post_flight_write behaviour without going through HTTP.
+    _bill behaviour without going through HTTP.
 
     Used by both converse-stream and invoke-with-response-stream routes.  The
     caller is responsible for building the correct event_iter (iter_converse_stream
@@ -753,7 +627,7 @@ def _sse_stream(event_iter, usage_out: dict, pf: PreflightResult, log_ctx: dict)
     except BedrockError as exc:
         # Mid-stream Bedrock error after a 200 + headers were already sent. Log a
         # terminal event for observability parity with the non-streaming reject
-        # path: _post_flight_write skips when no usage arrived before the error,
+        # path: _bill skips when no usage arrived before the error,
         # so without this the request would vanish from the logs.
         logger.warning(
             json.dumps(
@@ -769,7 +643,7 @@ def _sse_stream(event_iter, usage_out: dict, pf: PreflightResult, log_ctx: dict)
             + "\n\n"
         )
     finally:
-        _post_flight_write(usage_out, pf, log_ctx)
+        _bill(usage_out, pf, log_ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -821,8 +695,9 @@ async def _run_streaming(
         )
         return _error_json(500, "INTERNAL_ERROR", "Internal server error")
 
-    # SSE generator — runs after headers are sent; errors yield terminal frame
-    usage_out: dict = {}
+    # SSE generator — runs after headers are sent; errors yield terminal frame.
+    # Seeded with the invoke-stream response's tier; converse-stream's metadata overwrites it.
+    usage_out = {"service_tier": normalize_service_tier(response.get("serviceTier"))}
 
     return StreamingResponse(
         _sse_stream(iter_fn(response[stream_key], usage_out), usage_out, pf, log_ctx),
@@ -859,13 +734,14 @@ async def invoke_with_response_stream(
     bedrock_client=Depends(get_bedrock),
 ):
     """POST /model/{model_id}/invoke-with-response-stream — streaming InvokeModel proxy."""
+    open_fn = partial(open_invoke_stream, service_tier=request.headers.get(TIER_HEADER))
     return await _run_streaming(
         model_id,
         request,
         tables,
         bedrock_client,
         ROUTE_INVOKE,
-        open_invoke_stream,
+        open_fn,
         iter_invoke_stream,
         "body",
     )
@@ -882,7 +758,7 @@ def _mantle_sse_relay(resp, usage_out: dict, pf: PreflightResult, log_ctx: dict)
     Deliberately NOT _sse_stream: that emitter re-serializes parsed events as data-only
     frames, which would strip the ``event: <type>`` lines the Responses stream pairs with
     each ``data:`` line and that OpenAI clients dispatch on. Here the upstream bytes pass
-    through untouched and only the terminal event is inspected, for usage.
+    through untouched and only the terminal events are inspected, for usage and tier.
 
     Unlike _sse_stream there is no BedrockError branch: the Bedrock event stream signals
     mid-stream failures as errors members (bedrock._check_eventstream_error raises), while
@@ -898,9 +774,7 @@ def _mantle_sse_relay(resp, usage_out: dict, pf: PreflightResult, log_ctx: dict)
             + "\n\n"
         )
     finally:
-        if usage_out:
-            log_ctx["reasoning_tokens"] = usage_out.pop("reasoning_tokens", 0)
-        _post_flight_write(usage_out, pf, log_ctx)
+        _bill(usage_out, pf, log_ctx)
 
 
 @app.post("/openai/v1/responses")
@@ -937,10 +811,8 @@ async def responses(
 
         if not streaming:
             upstream_resp, usage = forward_responses(mantle_client, pf.model_id, body)
-            # Observability only — reasoning tokens are counted WITHIN output_tokens by the
-            # Responses API, so billing them as a component would double-charge (DD2).
-            log_ctx["reasoning_tokens"] = reasoning_tokens_of(upstream_resp.get("usage"))
-            return _bill_nonstreaming_response(upstream_resp, usage, pf, log_ctx, start_ms)
+            _bill(usage, pf, log_ctx)
+            return JSONResponse(upstream_resp)
 
         # B1 parity: open eagerly so upstream 4xx/5xx surface before StreamingResponse.
         resp = open_responses_stream(mantle_client, pf.model_id, body)

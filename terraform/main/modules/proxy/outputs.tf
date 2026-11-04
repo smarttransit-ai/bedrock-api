@@ -24,7 +24,7 @@ output "ecr_repository_url" {
 }
 
 output "pricing_bucket" {
-  description = "S3 bucket holding the live pricing catalog (pricing/current.json)."
+  description = "S3 bucket holding the live pricing catalog (pricing/catalog-v2.json)."
   value       = aws_s3_bucket.pricing.bucket
 }
 

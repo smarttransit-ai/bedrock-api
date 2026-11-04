@@ -63,6 +63,8 @@ def test_forward_responses_parses_observed_usage_shape():
         "output_tokens": 5,
         "cache_read_input_tokens": 0,
         "cache_write_input_tokens": 0,
+        "service_tier": "standard",
+        "reasoning_tokens": 0,
     }
 
 
@@ -89,8 +91,8 @@ def test_reasoning_tokens_are_reported_but_never_billed():
     _, parsed = forward_responses(client, "openai.gpt-5.6-luna", {"input": "hi"})
     # output_tokens is reported verbatim — NOT 100 + 80.
     assert parsed["output_tokens"] == 100
-    assert "reasoning_tokens" not in parsed  # never a billing dimension
-    assert reasoning_tokens_of(usage) == 80  # available for logging
+    # Carried for logging only; reasoning tokens are inside output_tokens, never billed twice.
+    assert parsed["reasoning_tokens"] == 80
 
 
 def test_reasoning_tokens_of_tolerates_missing_details():
@@ -253,6 +255,56 @@ def test_stream_relays_event_lines_verbatim_and_harvests_usage():
     assert usage_out["reasoning_tokens"] == 80  # logged, not billed
 
 
+def _terminal(event_type: str, response: dict) -> list[str]:
+    return [
+        f"event: {event_type}",
+        f"data: {json.dumps({'type': event_type, 'response': response})}",
+        "",
+    ]
+
+
+@pytest.mark.parametrize("event_type", ["response.incomplete", "response.failed"])
+def test_stream_harvests_usage_and_tier_from_every_terminal_event(event_type):
+    response = {**COMPLETED["response"], "service_tier": "flex"}
+    resp = open_responses_stream(
+        _client(_sse(_terminal(event_type, response))), "openai.gpt-oss-120b", {"input": "hi"}
+    )
+    usage_out: dict = {}
+    list(iter_responses_sse(resp, usage_out))
+    assert usage_out["output_tokens"] == 100
+    assert usage_out["service_tier"] == "flex"
+    assert usage_out["terminal_event"] == event_type
+
+
+def test_stream_harvests_usage_before_relaying_the_terminal_line():
+    """A client that disconnects right after the terminal event must still be billed."""
+    resp = open_responses_stream(
+        _client(_sse(_terminal("response.completed", COMPLETED["response"]))),
+        "openai.gpt-oss-120b",
+        {"input": "hi"},
+    )
+    usage_out: dict = {}
+    gen = iter_responses_sse(resp, usage_out)
+    assert next(gen) == "event: response.completed\n"
+    assert next(gen).startswith("data: ")  # the terminal line reaches the client...
+    gen.close()  # ...which then disconnects
+    assert usage_out["output_tokens"] == 100
+
+
+def test_stream_terminal_event_without_usage_leaves_no_token_keys():
+    resp = open_responses_stream(
+        _client(_sse(_terminal("response.failed", {"service_tier": "auto"}))),
+        "openai.gpt-oss-120b",
+        {"input": "hi"},
+    )
+    usage_out: dict = {}
+    list(iter_responses_sse(resp, usage_out))
+    assert usage_out == {
+        "service_tier": "standard",
+        "terminal_event": "response.failed",
+    }
+
+
 def test_stream_sets_stream_true_in_body():
     seen = {}
 
@@ -276,7 +328,7 @@ def test_stream_closes_response_even_on_early_exit():
 
 
 def test_stream_without_usage_leaves_usage_out_empty():
-    """No terminal event (disconnect) → empty usage → _post_flight_write skips the write."""
+    """No terminal event (disconnect) → empty usage → _bill skips the write."""
     resp = open_responses_stream(
         _client(_sse(["event: response.output_text.delta", 'data: {"delta": "hi"}', ""])),
         "openai.gpt-5.6-luna",

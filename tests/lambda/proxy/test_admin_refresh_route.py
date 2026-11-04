@@ -65,7 +65,7 @@ def test_admin_happy_path_writes_and_busts_cache(admin_client, monkeypatch):
     client, abearer, _ = admin_client
     anchor = "us.anthropic.claude-sonnet-4-6"
     # Baseline (no live object yet) → served from DEFAULT_PRICING.
-    base, _, _, _, _ = compute_cost(anchor, "on_demand", 1000, 1000, 0, 0)
+    base, _, _, _, _ = compute_cost(anchor, "standard", 1000, 1000, 0, 0)
 
     # Refresh with all rates doubled (in-band), then the new rates must be live.
     monkeypatch.setattr(pricing_refresh, "fetch_litellm", lambda: _raw_scaled(2.0))
@@ -74,7 +74,7 @@ def test_admin_happy_path_writes_and_busts_cache(admin_client, monkeypatch):
     assert resp.json()["entry_count"] > 0
     assert load_live_catalog(boto3.client("s3", region_name="us-east-1")) is not None
 
-    after, _, _, _, _ = compute_cost(anchor, "on_demand", 1000, 1000, 0, 0)
+    after, _, _, _, _ = compute_cost(anchor, "standard", 1000, 1000, 0, 0)
     assert after == base * 2  # cache was busted; the live (doubled) catalog is served
 
 

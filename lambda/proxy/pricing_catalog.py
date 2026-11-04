@@ -10,6 +10,8 @@ so the baked-in catalog and a live-refreshed catalog are computed identically.
 vendor snapshot is produced (see scripts/vendor/litellm_model_prices.json _meta).
 ``_build_entries`` then applies the µUSD conversion and cross-region derivation.
 
+Catalog shape: ``{model_id: {"standard": rates, "flex"?: rates, "priority"?: rates}}``.
+
 litellm is MIT licensed. See scripts/vendor/litellm_model_prices.json for attribution.
 """
 
@@ -24,11 +26,11 @@ _BEDROCK_PROVIDERS = frozenset({"bedrock", "bedrock_converse"})
 
 # bedrock-mantle (the OpenAI-compatible endpoint) is priced too, but its IDs are
 # namespaced under "mantle/" rather than merged into the flat Converse namespace.
-# Two IDs — openai.gpt-oss-safeguard-120b/20b — exist under BOTH bedrock_converse and
-# bedrock_mantle at DIFFERENT rates (safeguard-20b: $0.07/$0.20 vs $0.075/$0.30 per 1M).
-# A flat merge would let dict order decide the winner and silently re-price an existing
-# Converse model. Namespacing keeps them distinct; the caller selects by route, never by
-# parsing the model string (openai.* legitimately spans both providers).
+# Several IDs exist under BOTH bedrock_converse and bedrock_mantle, some at DIFFERENT
+# rates (openai.gpt-6-sol: $2/$10 vs $2.20/$11 per 1M). A flat merge would let dict
+# order decide the winner and silently re-price an existing Converse model. Namespacing
+# keeps them distinct; the caller selects by route, never by parsing the model string
+# (openai.* legitimately spans both providers).
 _MANTLE_PROVIDER = "bedrock_mantle"
 MANTLE_NAMESPACE = "mantle/"
 
@@ -77,6 +79,32 @@ _CROSS_REGION_PROVIDERS = frozenset(
 ALLOWLISTED_REMOVALS: frozenset[str] = frozenset()
 
 
+# Bedrock service tiers priced per token, keyed to their litellm cost-field suffix.
+# Reserved is commitment-priced (no per-token rate), so it bills Standard (pricing.py).
+_TIER_SUFFIXES = {"standard": "", "flex": "_flex", "priority": "_priority"}
+SERVICE_TIERS = tuple(_TIER_SUFFIXES)
+
+# Catalog rate key → litellm cost field (before the tier suffix).
+_COST_FIELDS = {
+    "input_usd_micros_per_1k": "input_cost_per_token",
+    "output_usd_micros_per_1k": "output_cost_per_token",
+    "cache_read_input_usd_micros_per_1k": "cache_read_input_token_cost",
+    "cache_write_input_usd_micros_per_1k": "cache_creation_input_token_cost",
+}
+_CACHE_RATES = ("cache_read_input_usd_micros_per_1k", "cache_write_input_usd_micros_per_1k")
+
+
+def normalize_service_tier(raw: object) -> str:
+    """Map an upstream tier (``{"type": x}`` or a string) to a lower-cased catalog tier name.
+
+    Absent, ``default``, ``auto`` and malformed values mean ``"standard"``; never raises.
+    """
+    if isinstance(raw, dict):
+        raw = raw.get("type")
+    tier = raw.lower() if isinstance(raw, str) else ""
+    return "standard" if tier in ("", "default", "auto") else tier
+
+
 def _provider_of(model_id: str) -> str:
     """Return the provider prefix of a base (non-region-scoped) model ID.
 
@@ -98,27 +126,39 @@ def _per_token_to_micros_per_1k(v: float) -> int:
     return round(v * 1e9)
 
 
-def _to_on_demand_rates(entry: dict) -> dict[str, int]:
-    """Convert a litellm pricing entry to an on_demand rates dict.
+def _to_rates(
+    entry: dict, tier: str, standard: dict[str, int] | None = None
+) -> dict[str, int] | None:
+    """Convert one service tier of a litellm entry to µUSD rates; None if the tier is unpriced.
 
-    Cache fallback (D3): an absent or null cache field defaults to the output rate.
-    entry.get(key) returns None for both absent keys and JSON null values; the
-    is-not-None guard handles both identically.
+    Standard defaults a missing cache cost to its output rate (D3). A Flex/Priority tier
+    (``standard`` = the built Standard rates) is kept only if its input and output costs
+    match Standard's on zero-ness, so an upstream ``*_flex: 0`` can't make a tier free. A
+    tier cache cost that is missing or fails that test against Standard's cache rate becomes
+    Standard's cache rate scaled by the tier's raw input ratio (output ratio if Standard input
+    is free); the tier output rate would over-bill nova-2-pro cache reads ~32x.
     """
-    inp = _per_token_to_micros_per_1k(entry["input_cost_per_token"])
-    out = _per_token_to_micros_per_1k(entry["output_cost_per_token"])
-    cache_read_raw = entry.get("cache_read_input_token_cost")
-    cache_write_raw = entry.get("cache_creation_input_token_cost")
-    return {
-        "input_usd_micros_per_1k": inp,
-        "output_usd_micros_per_1k": out,
-        "cache_read_input_usd_micros_per_1k": _per_token_to_micros_per_1k(cache_read_raw)
-        if cache_read_raw is not None
-        else out,
-        "cache_write_input_usd_micros_per_1k": _per_token_to_micros_per_1k(cache_write_raw)
-        if cache_write_raw is not None
-        else out,
-    }
+    suffix = _TIER_SUFFIXES[tier]
+    costs = {rate: entry.get(field + suffix) for rate, field in _COST_FIELDS.items()}
+    inp, out = costs["input_usd_micros_per_1k"], costs["output_usd_micros_per_1k"]
+    if inp is None or out is None:
+        return None
+    if standard is None:
+        return {
+            rate: _per_token_to_micros_per_1k(out if cost is None else cost)
+            for rate, cost in costs.items()
+        }
+    std_in, std_out = entry["input_cost_per_token"], entry["output_cost_per_token"]
+    if (inp > 0) != (std_in > 0) or (out > 0) != (std_out > 0):
+        return None
+    ratio = inp / std_in if std_in else out / std_out
+    rates = {}
+    for rate, cost in costs.items():
+        if rate in _CACHE_RATES and (cost is None or (cost > 0) != (standard[rate] > 0)):
+            rates[rate] = round(standard[rate] * ratio)
+        else:
+            rates[rate] = _per_token_to_micros_per_1k(cost)
+    return rates
 
 
 def filter_bedrock(raw: dict) -> dict:
@@ -168,7 +208,8 @@ def _build_entries(
     Pass 2a derives us./global. variants from base IDs when absent, but only for
     providers with real AWS cross-region inference profiles (_CROSS_REGION_PROVIDERS).
     Pass 2b derives base IDs from us.* variants when absent (D5 generalization).
-    Neither pass overwrites an explicit vendor entry.
+    Neither pass overwrites an explicit vendor entry. Derived IDs inherit every service
+    tier of their source.
     """
     entries: dict[str, dict[str, dict[str, int]]] = {}
     derived_ids: list[str] = []
@@ -200,11 +241,10 @@ def _build_entries(
         # Token-priced embeddings (input > 0, output 0) ARE billable and kept.
         if inp_cost <= 0 and out_cost <= 0:
             continue
-        on_demand = _to_on_demand_rates(entry)
-        # D2: batch mirrors on_demand (litellm carries no Bedrock batch rates).
-        # NOTE: This over-counts batch requests for models with AWS batch discounts
-        # (e.g., Claude 3.x/4.x have a 50% batch discount). Accept this tradeoff.
-        entries[model_id] = {"on_demand": on_demand, "batch": dict(on_demand)}
+        std = _to_rates(entry, "standard")
+        entries[model_id] = {"standard": std} | {
+            t: r for t in SERVICE_TIERS[1:] if (r := _to_rates(entry, t, std))
+        }
 
     # Pass 2a: for each true base ID, derive us./global. variants if absent (D5).
     # A "base" ID is NOT region-scoped (no us./global./eu./ap./us-gov. prefix), and its
@@ -243,7 +283,7 @@ def build_catalog(raw: dict) -> dict[str, dict[str, dict[str, int]]]:
     """Full transform: raw litellm price map → pricing catalog.
 
     Filters to routeable bedrock-runtime + bedrock-mantle entries (the latter namespaced
-    under mantle/, see filter_bedrock) then builds the µUSD on_demand/batch map.
+    under mantle/, see filter_bedrock) then builds the µUSD per-service-tier map.
     Same shape as DEFAULT_PRICING in pricing.py.
     """
     return _build_entries(filter_bedrock(raw))[0]

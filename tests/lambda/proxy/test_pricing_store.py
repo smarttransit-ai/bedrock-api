@@ -18,7 +18,7 @@ def _s3():
 
 def test_save_then_load_round_trip(pricing_bucket):
     s3 = _s3()
-    catalog = {"m": {"on_demand": {"input_usd_micros_per_1k": 1}}}
+    catalog = {"m": {"standard": {"input_usd_micros_per_1k": 1}}}
     save_live_catalog(s3, catalog, {"entry_count": 1})
     assert load_live_catalog(s3) == catalog
 
@@ -29,7 +29,7 @@ def test_load_absent_object_returns_none(pricing_bucket):
 
 def test_load_meta_round_trip(pricing_bucket):
     s3 = _s3()
-    save_live_catalog(s3, {"m": {"on_demand": {}}}, {"entry_count": 1, "fetched_at": "t"})
+    save_live_catalog(s3, {"m": {"standard": {}}}, {"entry_count": 1, "fetched_at": "t"})
     assert load_live_meta(s3) == {"entry_count": 1, "fetched_at": "t"}
 
 

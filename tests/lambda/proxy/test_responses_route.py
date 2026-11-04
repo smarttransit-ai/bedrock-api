@@ -8,12 +8,12 @@ import json
 
 import httpx
 import pytest
-from conftest import _make_token
+from conftest import GPT_OSS_FLEX_USD_MICROS, _make_token, usage_row
 
 MODEL = "openai.gpt-5.6-luna"
-# Catalog rates for mantle/openai.gpt-5.6-luna: $1.10/$6.60 per 1M (µUSD per 1k tokens).
-LUNA_INPUT_RATE = 1100
-LUNA_OUTPUT_RATE = 6600
+# Catalog rates for mantle/openai.gpt-5.6-luna: $0.22/$1.32 per 1M (µUSD per 1k tokens).
+LUNA_INPUT_RATE = 220
+LUNA_OUTPUT_RATE = 1320
 # The Opus-tier fallback an uncatalogued model would hit — the bug this route must avoid.
 FALLBACK_INPUT_RATE = 15_000
 
@@ -36,17 +36,22 @@ def _ok_handler(request):
     return httpx.Response(200, json={"output": [], "usage": USAGE})
 
 
-def _sse_handler(request):
-    completed = {"type": "response.completed", "response": {"usage": USAGE}}
-    body = (
-        "event: response.output_text.delta\n"
-        'data: {"type": "response.output_text.delta", "delta": "hi"}\n'
-        "\n"
-        "event: response.completed\n"
-        f"data: {json.dumps(completed)}\n"
-        "\n"
+def _terminal_sse(event_type: str, response: dict):
+    data = json.dumps({"type": event_type, "response": response})
+    return lambda request: httpx.Response(
+        200,
+        text=(
+            "event: response.output_text.delta\n"
+            'data: {"type": "response.output_text.delta", "delta": "hi"}\n'
+            "\n"
+            f"event: {event_type}\n"
+            f"data: {data}\n"
+            "\n"
+        ),
     )
-    return httpx.Response(200, text=body)
+
+
+_sse_handler = _terminal_sse("response.completed", {"usage": USAGE})
 
 
 @pytest.fixture()
@@ -99,7 +104,7 @@ def test_responses_happy_path_bills_at_catalog_rates(responses_client, caplog):
     assert audit["fallback_applied"] is False
     assert audit["applied_rates"]["input_usd_micros_per_1k"] == LUNA_INPUT_RATE
     assert audit["applied_rates"]["output_usd_micros_per_1k"] == LUNA_OUTPUT_RATE
-    # 1000 in + 1000 out at $1.10/$6.60 per 1M = 1100 + 6600 µUSD
+    # 1000 in + 1000 out at $0.22/$1.32 per 1M = 220 + 1320 µUSD
     assert audit["usd_micros"] == LUNA_INPUT_RATE + LUNA_OUTPUT_RATE
 
     _, usage_table, _ = tables
@@ -286,7 +291,7 @@ def test_billing_failure_still_returns_the_upstream_response(responses_client, c
 def test_midstream_error_emits_terminal_frame_and_skips_billing(responses_client, caplog):
     """A 200 stream that dies mid-flight: caller gets a terminal error frame; no partial bill.
 
-    Usage never arrives (the completed event is lost), so _post_flight_write must skip the
+    Usage never arrives (the completed event is lost), so _bill must skip the
     write rather than bill a partial/zero-token request.
     """
 
@@ -319,3 +324,36 @@ def test_midstream_error_emits_terminal_frame_and_skips_billing(responses_client
         if r.message.startswith("{") and '"pricing_audit"' in r.message
     ]
     assert all(a.get("status") != 200 for a in audits)
+
+
+# ---------------------------------------------------------------------------
+# Service tiers + every terminal event bills (issue #15)
+# ---------------------------------------------------------------------------
+
+GPT_OSS = "openai.gpt-oss-120b"  # the mantle/ wire ID of conftest.GPT_OSS_MODEL
+
+
+def _flex_ok_handler(request):
+    return httpx.Response(200, json={"output": [], "usage": USAGE, "service_tier": "flex"})
+
+
+@pytest.mark.parametrize(
+    ("handler", "stream"),
+    [
+        (_flex_ok_handler, False),
+        (_terminal_sse("response.completed", {"usage": USAGE, "service_tier": "flex"}), True),
+    ],
+)
+def test_flex_responses_bill_the_flex_rate(responses_client, caplog, handler, stream):
+    make, token_id, bearer, tables = responses_client
+    with caplog.at_level("INFO"):
+        resp = make(handler).post(
+            "/openai/v1/responses",
+            json={"model": GPT_OSS, "input": "hi", "service_tier": "flex", "stream": stream},
+            headers=_auth(bearer),
+        )
+    assert resp.status_code == 200
+    audit = _pricing_audit(caplog)
+    assert audit["service_tier"] == "flex"
+    assert audit["fallback_applied"] is False
+    assert int(usage_row(tables[1], token_id)["usd_micros"]) == GPT_OSS_FLEX_USD_MICROS

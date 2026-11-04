@@ -54,7 +54,7 @@ def test_validate_rejects_shrunk():
 
 def test_validate_rejects_missing_anchor():
     cat = {
-        f"m{i}": {"on_demand": {"input_usd_micros_per_1k": 1, "output_usd_micros_per_1k": 1}}
+        f"m{i}": {"standard": {"input_usd_micros_per_1k": 1, "output_usd_micros_per_1k": 1}}
         for i in range(len(DEFAULT_PRICING))
     }
     with pytest.raises(ValueError):
@@ -63,16 +63,23 @@ def test_validate_rejects_missing_anchor():
 
 def test_validate_rejects_zeroed_anchor():
     cat = _valid_catalog()
-    cat["us.anthropic.claude-sonnet-4-6"]["on_demand"]["output_usd_micros_per_1k"] = 0
+    cat["us.anthropic.claude-sonnet-4-6"]["standard"]["output_usd_micros_per_1k"] = 0
     with pytest.raises(ValueError):
         validate_catalog(cat)
 
 
 def test_validate_rejects_out_of_band_anchor():
     cat = _valid_catalog()
-    base = DEFAULT_PRICING["us.anthropic.claude-sonnet-4-6"]["on_demand"]["input_usd_micros_per_1k"]
-    cat["us.anthropic.claude-sonnet-4-6"]["on_demand"]["input_usd_micros_per_1k"] = base * 100
+    base = DEFAULT_PRICING["us.anthropic.claude-sonnet-4-6"]["standard"]["input_usd_micros_per_1k"]
+    cat["us.anthropic.claude-sonnet-4-6"]["standard"]["input_usd_micros_per_1k"] = base * 100
     with pytest.raises(ValueError):
+        validate_catalog(cat)
+
+
+def test_validate_rejects_anchor_that_lost_a_tier():
+    cat = _valid_catalog()
+    del cat["openai.gpt-oss-120b-1:0"]["flex"]
+    with pytest.raises(ValueError, match="flex"):
         validate_catalog(cat)
 
 

@@ -8,8 +8,9 @@ Run from repo root:
     python3 scripts/gen_pricing.py
 
 The output (DEFAULT_PRICING block) must be manually copied into
-lambda/proxy/pricing.py, replacing the existing block between the top
-comment and the _FALLBACK_BY_MODE definition.
+lambda/proxy/pricing.py, replacing only the existing "# ===" header and the
+DEFAULT_PRICING dict, up to and including its closing "}". Everything after it
+(logger, the type aliases, _FALLBACK_RATES) is hand-written and must stay.
 
 The litellm → catalog transform itself lives in lambda/proxy/pricing_catalog.py
 (shared with the runtime refresh endpoint); this script is the offline driver
@@ -29,7 +30,12 @@ The litellm → catalog transform itself lives in lambda/proxy/pricing_catalog.p
        raw = json.load(open("/tmp/litellm_full.json"))
        KEEP = ("litellm_provider", "input_cost_per_token", "output_cost_per_token",
                "cache_read_input_token_cost", "cache_creation_input_token_cost",
-               "output_cost_per_reasoning_token")
+               "output_cost_per_reasoning_token",
+               "input_cost_per_token_flex", "output_cost_per_token_flex",
+               "cache_read_input_token_cost_flex", "cache_creation_input_token_cost_flex",
+               "input_cost_per_token_priority", "output_cost_per_token_priority",
+               "cache_read_input_token_cost_priority",
+               "cache_creation_input_token_cost_priority")
        out = {k: {f: e[f] for f in KEEP if f in e} for k, e in filter_bedrock(raw).items()}
        # then: sort keys, prepend the _meta block, write scripts/vendor/litellm_model_prices.json
 
@@ -37,7 +43,8 @@ The litellm → catalog transform itself lives in lambda/proxy/pricing_catalog.p
    both token costs non-null, strips the provider's key prefix (bedrock/ or bedrock_mantle/),
    drops keys still holding a '/' afterward, and namespaces mantle keys under mantle/.
    Retain output_cost_per_reasoning_token when present so _build_entries can warn that our
-   rates would underbill (no priced provider carries it today).
+   rates would underbill (no priced provider carries it today), and the *_flex / *_priority
+   cost fields so _build_entries can price the Flex and Priority service tiers.
    NOTE: mantle entries MUST be stored as mantle/<id>; prefixing them with bedrock/ instead
    leaves a slash in the stripped key and the whole mantle family is silently dropped.
 3. Update _meta.upstream_commit and _meta.fetched_date in the vendor file.
@@ -105,14 +112,12 @@ def main() -> None:
     print("# Source: scripts/vendor/litellm_model_prices.json (litellm community data, MIT)")
     print("# All values: integer USD-micros (µUSD) per 1,000 tokens.")
     print("# $15.00/1M tokens = 15_000 µUSD/1k tokens.")
-    print("# Batch rates mirror on_demand (litellm carries no Bedrock batch rates).")
     print("# " + "=" * 75)
     print("DEFAULT_PRICING: dict[str, dict[str, dict[str, int]]] = {")
     for mid in sorted(entries):
         v = entries[mid]
-        on_demand = v["on_demand"]
-        inp = on_demand["input_usd_micros_per_1k"]
-        out = on_demand["output_usd_micros_per_1k"]
+        inp = v["standard"]["input_usd_micros_per_1k"]
+        out = v["standard"]["output_usd_micros_per_1k"]
         comment = f"  # ${inp / 1000:.4g}/${out / 1000:.4g} per 1M"
         print(f'    "{mid}": {v},{comment}')
     print("}")

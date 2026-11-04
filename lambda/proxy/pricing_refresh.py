@@ -26,16 +26,20 @@ LITELLM_SOURCE_URL = os.environ.get(
 _FETCH_TIMEOUT_S = 15
 _MAX_BODY_BYTES = 10 * 1024 * 1024  # 10 MB cap — reject larger (fail closed)
 
-# In-use cross-region inference-profile IDs (MEMORY.md / bedrock-model-access). The
-# refreshed catalog must keep these priced and within a sane band of the baked-in
-# rates. These are chat/completion models with nonzero input AND output rates, so the
-# >0 check below is anchor-specific by design (token-priced embeddings have output 0).
+# Anchor IDs the refreshed catalog must keep priced, at every service tier the baked-in
+# catalog has for them, within a sane band of the baked-in rates. These are chat/completion
+# models with nonzero input AND output rates, so the >0 check below is anchor-specific by
+# design (token-priced embeddings have output 0).
 _REQUIRED_MODEL_IDS = (
+    # In-use cross-region inference-profile IDs (MEMORY.md / bedrock-model-access).
     "us.anthropic.claude-sonnet-4-6",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    # Service-tier anchor: carries Flex and Priority rates, so an upstream regression that
+    # drops the tier fields fails here rather than silently billing every tier Standard.
+    "openai.gpt-oss-120b-1:0",
     # bedrock-mantle anchor. Without it, an upstream regression that drops the
     # bedrock_mantle family would pass validate_catalog (the 80%-shrink guard barely
-    # moves for 13 of 300+ entries), go live unpriced, and bill every Responses request
+    # moves for 33 of 440+ entries), go live unpriced, and bill every Responses request
     # at the Opus-tier fallback — a ~11x over-count, silent except for a log field.
     "mantle/openai.gpt-5.6-luna",
 )
@@ -66,14 +70,15 @@ def validate_catalog(catalog: dict) -> None:
     for mid in _REQUIRED_MODEL_IDS:
         if mid not in catalog:
             raise ValueError(f"required model {mid!r} missing from rebuilt catalog")
-        rates = catalog[mid]["on_demand"]
-        base = DEFAULT_PRICING[mid]["on_demand"]
-        for key in ("input_usd_micros_per_1k", "output_usd_micros_per_1k"):
-            value = rates.get(key, 0)
-            if value <= 0:
-                raise ValueError(f"{mid}.{key} is non-positive ({value})")
-            if not (base[key] / 10 <= value <= base[key] * 10):
-                raise ValueError(f"{mid}.{key}={value} outside 0.1x-10x of baked-in {base[key]}")
+        for tier, base in DEFAULT_PRICING[mid].items():
+            for key in ("input_usd_micros_per_1k", "output_usd_micros_per_1k"):
+                value = catalog[mid].get(tier, {}).get(key, 0)
+                if value <= 0:
+                    raise ValueError(f"{mid}.{tier}.{key} is non-positive ({value})")
+                if not (base[key] / 10 <= value <= base[key] * 10):
+                    raise ValueError(
+                        f"{mid}.{tier}.{key}={value} outside 0.1x-10x of baked-in {base[key]}"
+                    )
 
 
 def refresh_pricing(s3) -> dict:
@@ -91,5 +96,5 @@ def refresh_pricing(s3) -> dict:
     return {
         "entry_count": len(catalog),
         "fetched_at": meta["fetched_at"],
-        "anchors": {mid: catalog[mid]["on_demand"] for mid in _REQUIRED_MODEL_IDS},
+        "anchors": {mid: catalog[mid] for mid in _REQUIRED_MODEL_IDS},
     }

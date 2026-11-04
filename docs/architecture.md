@@ -61,7 +61,7 @@ graph TB
 
     Mantle["AWS bedrock-mantle<br/>/openai/v1/responses → Responses API<br/>(openai.* · google.gemma-4-* · xai.grok-4.3)"]
 
-    PricingS3["S3: bedrock-api-pricing-&lt;account&gt;<br/>pricing/current.json<br/>(live pricing catalog)"]
+    PricingS3["S3: bedrock-api-pricing-&lt;account&gt;<br/>pricing/catalog-v2.json<br/>(live pricing catalog)"]
 
     subgraph CW["CloudWatch"]
         LogLambda["/aws/lambda/bedrock-api-proxy"]
@@ -111,9 +111,9 @@ Both are signed under the `bedrock` SigV4 service name and share one IAM stateme
 
 **Pricing keys are namespaced, and this is load-bearing.** litellm prices mantle models
 under `bedrock_mantle/<id>`; the catalog stores them as `mantle/<id>`. They are *not*
-merged into the flat Converse namespace because `openai.gpt-oss-safeguard-120b/20b` exist
-under **both** providers at **different** rates — a flat merge would let dict ordering
-silently re-price an existing Converse model.
+merged into the flat Converse namespace because several IDs exist under **both** providers,
+some at **different** rates (`openai.gpt-6-sol`: $2/$10 vs $2.20/$11 per 1M) — a flat merge
+would let dict ordering silently re-price an existing Converse model.
 
 Consequently the provider is chosen by **route**, never by parsing the model string
 (`openai.*` legitimately spans both). `PreflightResult.pricing_model_id` carries the
@@ -123,6 +123,10 @@ miss the catalog and charge the Opus-tier fallback (~11x) with nothing failing l
 
 Reasoning tokens (`output_tokens_details.reasoning_tokens`) are a **subset** of
 `output_tokens`, not an additive dimension: they are logged, never billed separately.
+
+**Each request bills at the service tier the response reports** (Standard, Flex or
+Priority), not the one requested. The catalog keys rates by tier from litellm's `*_flex` /
+`*_priority` fields; a model without a rate for the tier bills its Standard rate.
 
 ---
 
@@ -176,7 +180,6 @@ erDiagram
         number limit_max_input_tokens
         number limit_max_output_tokens
         number limit_rps
-        string pricing_mode
     }
     USAGE {
         string token_id PK
@@ -209,9 +212,9 @@ graph LR
     subgraph Filters["Log Metric Filters → namespace: bedrock-api/proxy"]
         F1["bedrock-api-request-complete-count<br/>→ RequestCompleteCount"]
         F2["bedrock-api-pricing-fallback-count<br/>→ PricingFallbackCount"]
-        F3["bedrock-api-pricing-mode-invalid<br/>→ PricingModeInvalidCount"]
-        F4["bedrock-api-pricing-mode-on-demand-count<br/>→ PricingModeOnDemandCount"]
-        F5["bedrock-api-pricing-mode-batch-count<br/>→ PricingModeBatchCount"]
+        F3["bedrock-api-service-tier-standard-count<br/>→ ServiceTierStandardCount"]
+        F4["bedrock-api-service-tier-flex-count<br/>→ ServiceTierFlexCount"]
+        F5["bedrock-api-service-tier-priority-count<br/>→ ServiceTierPriorityCount"]
     end
 
     Alarm["Alarm: bedrock-api-pricing-fallback-high<br/>fires when fallbacks &gt; max(1% of requests, 100)<br/>in any 15-minute window"]
