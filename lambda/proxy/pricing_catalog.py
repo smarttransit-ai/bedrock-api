@@ -98,9 +98,10 @@ _COST_FIELD_NAMES = tuple(
     field + suffix for field in _COST_FIELDS.values() for suffix in _TIER_SUFFIXES.values()
 )
 
-# Plausible bounds: a positive cost in USD/token ($0.0001 to $1,000 per 1M tokens), and
-# a Flex/Priority cost as a multiple of the matching Standard cost.
-_COST_BOUNDS = (1e-10, 1e-3)
+# Plausible bounds: a positive cost in USD/token ($0.0005 to $1,000 per 1M tokens) — the
+# floor is where a cost still rounds to >= 1 µUSD/1k, so nothing positive is stored as free
+# — and a Flex/Priority cost as a multiple of the matching Standard cost.
+_COST_BOUNDS = (5e-10, 1e-3)
 _TIER_RATIO_BOUNDS = (0.25, 4)
 
 

@@ -349,3 +349,8 @@ def test_implausible_upstream_cost_fails_the_build(extra, field):
     entry.update(input_cost_per_token_priority=2.0e-06, output_cost_per_token_priority=4.0e-06)
     with pytest.raises(ValueError, match=f"openai.m: {field}="):
         _tiers(entry | extra)
+
+
+def test_cost_that_would_round_to_zero_is_rejected():
+    with pytest.raises(ValueError, match="input_cost_per_token="):
+        _build_entries({"openai.m": _tiered(input_cost_per_token=3e-10)})
