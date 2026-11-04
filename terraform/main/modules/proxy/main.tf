@@ -15,7 +15,7 @@ resource "aws_ecr_repository" "proxy" {
 
 # ---------------------------------------------------------------------------
 # S3 bucket for the live pricing catalog (the single runtime pricing source).
-# The Lambda reads pricing/current.json (TTL-cached) and the admin refresh
+# The Lambda reads pricing/catalog-v2.json (TTL-cached) and the admin refresh
 # endpoint writes it. Versioned for cheap rollback of a bad refresh.
 # ---------------------------------------------------------------------------
 resource "aws_s3_bucket" "pricing" {
@@ -68,18 +68,6 @@ resource "aws_cloudwatch_log_metric_filter" "pricing_fallback_count" {
   }
 }
 
-resource "aws_cloudwatch_log_metric_filter" "pricing_mode_invalid" {
-  name           = "${var.name_prefix}-pricing-mode-invalid"
-  log_group_name = aws_cloudwatch_log_group.lambda.name
-  pattern        = "{ $.event = \"pricing_mode_invalid\" }"
-
-  metric_transformation {
-    name      = "PricingModeInvalidCount"
-    namespace = "${var.name_prefix}/proxy"
-    value     = "1"
-  }
-}
-
 resource "aws_cloudwatch_log_metric_filter" "request_complete_count" {
   name           = "${var.name_prefix}-request-complete-count"
   log_group_name = aws_cloudwatch_log_group.lambda.name
@@ -92,25 +80,15 @@ resource "aws_cloudwatch_log_metric_filter" "request_complete_count" {
   }
 }
 
-resource "aws_cloudwatch_log_metric_filter" "pricing_mode_on_demand_count" {
-  name           = "${var.name_prefix}-pricing-mode-on-demand-count"
+# Billed requests per Bedrock service tier (the tier the response reported).
+resource "aws_cloudwatch_log_metric_filter" "service_tier_count" {
+  for_each       = toset(["standard", "flex", "priority"])
+  name           = "${var.name_prefix}-service-tier-${each.key}-count"
   log_group_name = aws_cloudwatch_log_group.lambda.name
-  pattern        = "{ $.event = \"pricing_audit\" && $.pricing_mode = \"on_demand\" }"
+  pattern        = "{ $.event = \"pricing_audit\" && $.service_tier = \"${each.key}\" }"
 
   metric_transformation {
-    name      = "PricingModeOnDemandCount"
-    namespace = "${var.name_prefix}/proxy"
-    value     = "1"
-  }
-}
-
-resource "aws_cloudwatch_log_metric_filter" "pricing_mode_batch_count" {
-  name           = "${var.name_prefix}-pricing-mode-batch-count"
-  log_group_name = aws_cloudwatch_log_group.lambda.name
-  pattern        = "{ $.event = \"pricing_audit\" && $.pricing_mode = \"batch\" }"
-
-  metric_transformation {
-    name      = "PricingModeBatchCount"
+    name      = "ServiceTier${title(each.key)}Count"
     namespace = "${var.name_prefix}/proxy"
     value     = "1"
   }
