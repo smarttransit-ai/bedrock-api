@@ -5,6 +5,7 @@ import os
 import time
 
 from deps import get_s3
+from pricing_catalog import SERVICE_TIERS
 from pricing_store import load_live_catalog
 
 # Prices sourced from litellm community data (scripts/vendor/litellm_model_prices.json).
@@ -14,4508 +15,4683 @@ from pricing_store import load_live_catalog
 # Source: scripts/vendor/litellm_model_prices.json (litellm community data, MIT)
 # All values: integer USD-micros (µUSD) per 1,000 tokens.
 # $15.00/1M tokens = 15_000 µUSD/1k tokens.
-# Batch rates mirror on_demand (litellm carries no Bedrock batch rates).
 # ===========================================================================
 DEFAULT_PRICING: dict[str, dict[str, dict[str, int]]] = {
     "ai21.j2-mid-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 12500,
             "output_usd_micros_per_1k": 12500,
             "cache_read_input_usd_micros_per_1k": 12500,
             "cache_write_input_usd_micros_per_1k": 12500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 12500,
-            "output_usd_micros_per_1k": 12500,
-            "cache_read_input_usd_micros_per_1k": 12500,
-            "cache_write_input_usd_micros_per_1k": 12500,
-        },
+        }
     },  # $12.5/$12.5 per 1M
     "ai21.j2-ultra-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 18800,
             "output_usd_micros_per_1k": 18800,
             "cache_read_input_usd_micros_per_1k": 18800,
             "cache_write_input_usd_micros_per_1k": 18800,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 18800,
-            "output_usd_micros_per_1k": 18800,
-            "cache_read_input_usd_micros_per_1k": 18800,
-            "cache_write_input_usd_micros_per_1k": 18800,
-        },
+        }
     },  # $18.8/$18.8 per 1M
     "ai21.jamba-1-5-large-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2000,
             "output_usd_micros_per_1k": 8000,
             "cache_read_input_usd_micros_per_1k": 8000,
             "cache_write_input_usd_micros_per_1k": 8000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 8000,
-            "cache_read_input_usd_micros_per_1k": 8000,
-            "cache_write_input_usd_micros_per_1k": 8000,
-        },
+        }
     },  # $2/$8 per 1M
     "ai21.jamba-1-5-mini-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 200,
             "output_usd_micros_per_1k": 400,
             "cache_read_input_usd_micros_per_1k": 400,
             "cache_write_input_usd_micros_per_1k": 400,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 200,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
-        },
+        }
     },  # $0.2/$0.4 per 1M
     "ai21.jamba-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 700,
             "cache_read_input_usd_micros_per_1k": 700,
             "cache_write_input_usd_micros_per_1k": 700,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 700,
-            "cache_read_input_usd_micros_per_1k": 700,
-            "cache_write_input_usd_micros_per_1k": 700,
-        },
+        }
     },  # $0.5/$0.7 per 1M
+    "amazon.nova-2-5-sonic": {
+        "standard": {
+            "input_usd_micros_per_1k": 330,
+            "output_usd_micros_per_1k": 2750,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $0.33/$2.75 per 1M
     "amazon.nova-2-lite-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 300,
             "output_usd_micros_per_1k": 2500,
             "cache_read_input_usd_micros_per_1k": 75,
             "cache_write_input_usd_micros_per_1k": 2500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 2500,
-            "cache_read_input_usd_micros_per_1k": 75,
-            "cache_write_input_usd_micros_per_1k": 2500,
+        "priority": {
+            "input_usd_micros_per_1k": 525,
+            "output_usd_micros_per_1k": 4375,
+            "cache_read_input_usd_micros_per_1k": 131,
+            "cache_write_input_usd_micros_per_1k": 4375,
         },
     },  # $0.3/$2.5 per 1M
     "amazon.nova-2-multimodal-embeddings-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 135,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 135,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.135/$0 per 1M
     "amazon.nova-2-pro-preview-20251202-v1:0": {
-        "on_demand": {
+        "standard": {
+            "input_usd_micros_per_1k": 1250,
+            "output_usd_micros_per_1k": 10000,
+            "cache_read_input_usd_micros_per_1k": 312,
+            "cache_write_input_usd_micros_per_1k": 10000,
+        },
+        "priority": {
             "input_usd_micros_per_1k": 2188,
             "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
+            "cache_read_input_usd_micros_per_1k": 546,
             "cache_write_input_usd_micros_per_1k": 17500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 2188,
-            "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
-            "cache_write_input_usd_micros_per_1k": 17500,
-        },
-    },  # $2.188/$17.5 per 1M
+    },  # $1.25/$10 per 1M
+    "amazon.nova-2-sonic-v1:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 330,
+            "output_usd_micros_per_1k": 2750,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $0.33/$2.75 per 1M
     "amazon.nova-lite-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 60,
             "output_usd_micros_per_1k": 240,
-            "cache_read_input_usd_micros_per_1k": 240,
+            "cache_read_input_usd_micros_per_1k": 15,
             "cache_write_input_usd_micros_per_1k": 240,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 60,
-            "output_usd_micros_per_1k": 240,
-            "cache_read_input_usd_micros_per_1k": 240,
-            "cache_write_input_usd_micros_per_1k": 240,
-        },
+        }
     },  # $0.06/$0.24 per 1M
     "amazon.nova-micro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 35,
             "output_usd_micros_per_1k": 140,
-            "cache_read_input_usd_micros_per_1k": 140,
+            "cache_read_input_usd_micros_per_1k": 9,
             "cache_write_input_usd_micros_per_1k": 140,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 35,
-            "output_usd_micros_per_1k": 140,
-            "cache_read_input_usd_micros_per_1k": 140,
-            "cache_write_input_usd_micros_per_1k": 140,
-        },
+        }
     },  # $0.035/$0.14 per 1M
     "amazon.nova-premier-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2500,
             "output_usd_micros_per_1k": 12500,
-            "cache_read_input_usd_micros_per_1k": 12500,
+            "cache_read_input_usd_micros_per_1k": 625,
             "cache_write_input_usd_micros_per_1k": 12500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 2500,
-            "output_usd_micros_per_1k": 12500,
-            "cache_read_input_usd_micros_per_1k": 12500,
-            "cache_write_input_usd_micros_per_1k": 12500,
+        "priority": {
+            "input_usd_micros_per_1k": 4375,
+            "output_usd_micros_per_1k": 21875,
+            "cache_read_input_usd_micros_per_1k": 1094,
+            "cache_write_input_usd_micros_per_1k": 21875,
         },
     },  # $2.5/$12.5 per 1M
     "amazon.nova-pro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 3200,
-            "cache_read_input_usd_micros_per_1k": 3200,
+            "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 3200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 3200,
-            "cache_read_input_usd_micros_per_1k": 3200,
-            "cache_write_input_usd_micros_per_1k": 3200,
+        "flex": {
+            "input_usd_micros_per_1k": 400,
+            "output_usd_micros_per_1k": 1600,
+            "cache_read_input_usd_micros_per_1k": 100,
+            "cache_write_input_usd_micros_per_1k": 1600,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1400,
+            "output_usd_micros_per_1k": 5600,
+            "cache_read_input_usd_micros_per_1k": 350,
+            "cache_write_input_usd_micros_per_1k": 5600,
         },
     },  # $0.8/$3.2 per 1M
     "amazon.titan-embed-g1-text-02": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.1/$0 per 1M
     "amazon.titan-embed-image-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.8/$0 per 1M
     "amazon.titan-embed-text-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.1/$0 per 1M
     "amazon.titan-embed-text-v2:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 20,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 20,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.02/$0 per 1M
     "amazon.titan-text-express-v1": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 1300,
-            "output_usd_micros_per_1k": 1700,
-            "cache_read_input_usd_micros_per_1k": 1700,
-            "cache_write_input_usd_micros_per_1k": 1700,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1300,
-            "output_usd_micros_per_1k": 1700,
-            "cache_read_input_usd_micros_per_1k": 1700,
-            "cache_write_input_usd_micros_per_1k": 1700,
-        },
-    },  # $1.3/$1.7 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 200,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        }
+    },  # $0.2/$0.6 per 1M
     "amazon.titan-text-lite-v1": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
-        },
-    },  # $0.3/$0.4 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 200,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 200,
+        }
+    },  # $0.15/$0.2 per 1M
     "amazon.titan-text-premier-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1500,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 1500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
-        },
+        }
     },  # $0.5/$1.5 per 1M
     "anthropic.claude-3-5-haiku-20241022-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 4000,
             "cache_read_input_usd_micros_per_1k": 80,
             "cache_write_input_usd_micros_per_1k": 1000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 4000,
-            "cache_read_input_usd_micros_per_1k": 80,
-            "cache_write_input_usd_micros_per_1k": 1000,
-        },
+        }
     },  # $0.8/$4 per 1M
     "anthropic.claude-3-5-sonnet-20240620-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "anthropic.claude-3-5-sonnet-20241022-v2:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "anthropic.claude-3-7-sonnet-20240620-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3600,
             "output_usd_micros_per_1k": 18000,
             "cache_read_input_usd_micros_per_1k": 360,
             "cache_write_input_usd_micros_per_1k": 4500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3600,
-            "output_usd_micros_per_1k": 18000,
-            "cache_read_input_usd_micros_per_1k": 360,
-            "cache_write_input_usd_micros_per_1k": 4500,
-        },
+        }
     },  # $3.6/$18 per 1M
     "anthropic.claude-3-7-sonnet-20250219-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
-    "anthropic.claude-3-haiku-20240307-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-    },  # $0.25/$1.25 per 1M
     "anthropic.claude-3-opus-20240229-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
-    "anthropic.claude-3-sonnet-20240229-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-    },  # $3/$15 per 1M
     "anthropic.claude-fable-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 10000,
             "output_usd_micros_per_1k": 50000,
             "cache_read_input_usd_micros_per_1k": 1000,
             "cache_write_input_usd_micros_per_1k": 12500,
-        },
-        "batch": {
+        }
+    },  # $10/$50 per 1M
+    "anthropic.claude-fable-5-1": {
+        "standard": {
             "input_usd_micros_per_1k": 10000,
             "output_usd_micros_per_1k": 50000,
-            "cache_read_input_usd_micros_per_1k": 1000,
+            "cache_read_input_usd_micros_per_1k": 250,
             "cache_write_input_usd_micros_per_1k": 12500,
-        },
+        }
     },  # $10/$50 per 1M
     "anthropic.claude-haiku-4-5-20251001-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 5000,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 1250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1000,
-            "output_usd_micros_per_1k": 5000,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 1250,
-        },
+        }
     },  # $1/$5 per 1M
     "anthropic.claude-haiku-4-5@20251001": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 5000,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 1250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1000,
-            "output_usd_micros_per_1k": 5000,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 1250,
-        },
+        }
     },  # $1/$5 per 1M
+    "anthropic.claude-haiku-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 100,
+            "output_usd_micros_per_1k": 500,
+            "cache_read_input_usd_micros_per_1k": 10,
+            "cache_write_input_usd_micros_per_1k": 125,
+        }
+    },  # $0.1/$0.5 per 1M
     "anthropic.claude-instant-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 2400,
             "cache_read_input_usd_micros_per_1k": 2400,
             "cache_write_input_usd_micros_per_1k": 2400,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 2400,
-            "cache_read_input_usd_micros_per_1k": 2400,
-            "cache_write_input_usd_micros_per_1k": 2400,
-        },
+        }
     },  # $0.8/$2.4 per 1M
+    "anthropic.claude-mythos-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 11000,
+            "output_usd_micros_per_1k": 55000,
+            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_write_input_usd_micros_per_1k": 13750,
+        }
+    },  # $11/$55 per 1M
+    "anthropic.claude-mythos-5-1": {
+        "standard": {
+            "input_usd_micros_per_1k": 10000,
+            "output_usd_micros_per_1k": 50000,
+            "cache_read_input_usd_micros_per_1k": 250,
+            "cache_write_input_usd_micros_per_1k": 12500,
+        }
+    },  # $10/$50 per 1M
+    "anthropic.claude-mythos-preview": {
+        "standard": {
+            "input_usd_micros_per_1k": 27500,
+            "output_usd_micros_per_1k": 137500,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 34375,
+        }
+    },  # $27.5/$137.5 per 1M
     "anthropic.claude-opus-4-1-20250805-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
     "anthropic.claude-opus-4-20250514-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
     "anthropic.claude-opus-4-5-20251101-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5000,
             "output_usd_micros_per_1k": 25000,
             "cache_read_input_usd_micros_per_1k": 500,
             "cache_write_input_usd_micros_per_1k": 6250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
+        }
     },  # $5/$25 per 1M
     "anthropic.claude-opus-4-6-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5000,
             "output_usd_micros_per_1k": 25000,
             "cache_read_input_usd_micros_per_1k": 500,
             "cache_write_input_usd_micros_per_1k": 6250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
+        }
     },  # $5/$25 per 1M
     "anthropic.claude-opus-4-7": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5000,
             "output_usd_micros_per_1k": 25000,
             "cache_read_input_usd_micros_per_1k": 500,
             "cache_write_input_usd_micros_per_1k": 6250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
+        }
     },  # $5/$25 per 1M
     "anthropic.claude-opus-4-8": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5000,
             "output_usd_micros_per_1k": 25000,
             "cache_read_input_usd_micros_per_1k": 500,
             "cache_write_input_usd_micros_per_1k": 6250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
+        }
     },  # $5/$25 per 1M
+    "anthropic.claude-opus-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5000,
+            "output_usd_micros_per_1k": 25000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6250,
+        }
+    },  # $5/$25 per 1M
+    "anthropic.claude-opus-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 4000,
+            "output_usd_micros_per_1k": 20000,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 5000,
+        }
+    },  # $4/$20 per 1M
     "anthropic.claude-sonnet-4-20250514-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "anthropic.claude-sonnet-4-5-20250929-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "anthropic.claude-sonnet-4-6": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "anthropic.claude-sonnet-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2000,
             "output_usd_micros_per_1k": 10000,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 2500,
-        },
-        "batch": {
+        }
+    },  # $2/$10 per 1M
+    "anthropic.claude-sonnet-5-5": {
+        "standard": {
             "input_usd_micros_per_1k": 2000,
             "output_usd_micros_per_1k": 10000,
-            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 2500,
-        },
+        }
     },  # $2/$10 per 1M
     "anthropic.claude-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 8000,
             "output_usd_micros_per_1k": 24000,
             "cache_read_input_usd_micros_per_1k": 24000,
             "cache_write_input_usd_micros_per_1k": 24000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
+        }
     },  # $8/$24 per 1M
     "anthropic.claude-v2:1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 8000,
             "output_usd_micros_per_1k": 24000,
             "cache_read_input_usd_micros_per_1k": 24000,
             "cache_write_input_usd_micros_per_1k": 24000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
+        }
     },  # $8/$24 per 1M
     "apac.amazon.nova-2-lite-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 330,
-            "output_usd_micros_per_1k": 2750,
-            "cache_read_input_usd_micros_per_1k": 82,
-            "cache_write_input_usd_micros_per_1k": 2750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 330,
-            "output_usd_micros_per_1k": 2750,
-            "cache_read_input_usd_micros_per_1k": 82,
-            "cache_write_input_usd_micros_per_1k": 2750,
-        },
-    },  # $0.33/$2.75 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 396,
+            "output_usd_micros_per_1k": 3311,
+            "cache_read_input_usd_micros_per_1k": 99,
+            "cache_write_input_usd_micros_per_1k": 3311,
+        }
+    },  # $0.396/$3.311 per 1M
     "apac.amazon.nova-2-pro-preview-20251202-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 2188,
-            "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
-            "cache_write_input_usd_micros_per_1k": 17500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2188,
-            "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
-            "cache_write_input_usd_micros_per_1k": 17500,
-        },
-    },  # $2.188/$17.5 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 1375,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 344,
+            "cache_write_input_usd_micros_per_1k": 11000,
+        }
+    },  # $1.375/$11 per 1M
     "apac.amazon.nova-lite-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 63,
             "output_usd_micros_per_1k": 252,
-            "cache_read_input_usd_micros_per_1k": 252,
+            "cache_read_input_usd_micros_per_1k": 16,
             "cache_write_input_usd_micros_per_1k": 252,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 63,
-            "output_usd_micros_per_1k": 252,
-            "cache_read_input_usd_micros_per_1k": 252,
-            "cache_write_input_usd_micros_per_1k": 252,
-        },
+        }
     },  # $0.063/$0.252 per 1M
     "apac.amazon.nova-micro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 37,
             "output_usd_micros_per_1k": 148,
-            "cache_read_input_usd_micros_per_1k": 148,
+            "cache_read_input_usd_micros_per_1k": 9,
             "cache_write_input_usd_micros_per_1k": 148,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 37,
-            "output_usd_micros_per_1k": 148,
-            "cache_read_input_usd_micros_per_1k": 148,
-            "cache_write_input_usd_micros_per_1k": 148,
-        },
+        }
     },  # $0.037/$0.148 per 1M
     "apac.amazon.nova-pro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 840,
             "output_usd_micros_per_1k": 3360,
-            "cache_read_input_usd_micros_per_1k": 3360,
+            "cache_read_input_usd_micros_per_1k": 210,
             "cache_write_input_usd_micros_per_1k": 3360,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 840,
-            "output_usd_micros_per_1k": 3360,
-            "cache_read_input_usd_micros_per_1k": 3360,
-            "cache_write_input_usd_micros_per_1k": 3360,
+        "flex": {
+            "input_usd_micros_per_1k": 420,
+            "output_usd_micros_per_1k": 1680,
+            "cache_read_input_usd_micros_per_1k": 105,
+            "cache_write_input_usd_micros_per_1k": 1680,
         },
     },  # $0.84/$3.36 per 1M
-    "apac.anthropic.claude-3-5-sonnet-20240620-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-    },  # $3/$15 per 1M
-    "apac.anthropic.claude-3-5-sonnet-20241022-v2:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-    },  # $3/$15 per 1M
-    "apac.anthropic.claude-3-haiku-20240307-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-    },  # $0.25/$1.25 per 1M
-    "apac.anthropic.claude-3-sonnet-20240229-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-    },  # $3/$15 per 1M
+    "apac.anthropic.claude-fable-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 11000,
+            "output_usd_micros_per_1k": 55000,
+            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_write_input_usd_micros_per_1k": 13750,
+        }
+    },  # $11/$55 per 1M
     "apac.anthropic.claude-haiku-4-5-20251001-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1100,
             "output_usd_micros_per_1k": 5500,
             "cache_read_input_usd_micros_per_1k": 110,
             "cache_write_input_usd_micros_per_1k": 1375,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1100,
-            "output_usd_micros_per_1k": 5500,
-            "cache_read_input_usd_micros_per_1k": 110,
-            "cache_write_input_usd_micros_per_1k": 1375,
-        },
+        }
     },  # $1.1/$5.5 per 1M
+    "apac.anthropic.claude-haiku-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 550,
+            "cache_read_input_usd_micros_per_1k": 11,
+            "cache_write_input_usd_micros_per_1k": 138,
+        }
+    },  # $0.11/$0.55 per 1M
+    "apac.anthropic.claude-mythos-preview": {
+        "standard": {
+            "input_usd_micros_per_1k": 27500,
+            "output_usd_micros_per_1k": 137500,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 34375,
+        }
+    },  # $27.5/$137.5 per 1M
+    "apac.anthropic.claude-opus-4-7": {
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 27500,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6875,
+        }
+    },  # $5.5/$27.5 per 1M
+    "apac.anthropic.claude-opus-4-8": {
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 27500,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6875,
+        }
+    },  # $5.5/$27.5 per 1M
+    "apac.anthropic.claude-opus-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 27500,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6875,
+        }
+    },  # $5.5/$27.5 per 1M
+    "apac.anthropic.claude-opus-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
     "apac.anthropic.claude-sonnet-4-20250514-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
+    "apac.anthropic.claude-sonnet-4-6": {
+        "standard": {
+            "input_usd_micros_per_1k": 3300,
+            "output_usd_micros_per_1k": 16500,
+            "cache_read_input_usd_micros_per_1k": 330,
+            "cache_write_input_usd_micros_per_1k": 4125,
+        }
+    },  # $3.3/$16.5 per 1M
+    "apac.anthropic.claude-sonnet-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$11 per 1M
+    "apac.anthropic.claude-sonnet-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 110,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$11 per 1M
+    "au.anthropic.claude-fable-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 11000,
+            "output_usd_micros_per_1k": 55000,
+            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_write_input_usd_micros_per_1k": 13750,
+        }
+    },  # $11/$55 per 1M
     "au.anthropic.claude-haiku-4-5-20251001-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1100,
             "output_usd_micros_per_1k": 5500,
             "cache_read_input_usd_micros_per_1k": 110,
             "cache_write_input_usd_micros_per_1k": 1375,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1100,
-            "output_usd_micros_per_1k": 5500,
-            "cache_read_input_usd_micros_per_1k": 110,
-            "cache_write_input_usd_micros_per_1k": 1375,
-        },
+        }
     },  # $1.1/$5.5 per 1M
+    "au.anthropic.claude-haiku-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 550,
+            "cache_read_input_usd_micros_per_1k": 11,
+            "cache_write_input_usd_micros_per_1k": 138,
+        }
+    },  # $0.11/$0.55 per 1M
+    "au.anthropic.claude-mythos-preview": {
+        "standard": {
+            "input_usd_micros_per_1k": 27500,
+            "output_usd_micros_per_1k": 137500,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 34375,
+        }
+    },  # $27.5/$137.5 per 1M
     "au.anthropic.claude-opus-4-6-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
     "au.anthropic.claude-opus-4-7": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
     "au.anthropic.claude-opus-4-8": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
+    "au.anthropic.claude-opus-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 27500,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6875,
+        }
+    },  # $5.5/$27.5 per 1M
+    "au.anthropic.claude-opus-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
     "au.anthropic.claude-sonnet-4-5-20250929-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3300,
             "output_usd_micros_per_1k": 16500,
             "cache_read_input_usd_micros_per_1k": 330,
             "cache_write_input_usd_micros_per_1k": 4125,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3300,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 330,
-            "cache_write_input_usd_micros_per_1k": 4125,
-        },
+        }
     },  # $3.3/$16.5 per 1M
     "au.anthropic.claude-sonnet-4-6": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3300,
             "output_usd_micros_per_1k": 16500,
             "cache_read_input_usd_micros_per_1k": 330,
             "cache_write_input_usd_micros_per_1k": 4125,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3300,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 330,
-            "cache_write_input_usd_micros_per_1k": 4125,
-        },
+        }
     },  # $3.3/$16.5 per 1M
     "au.anthropic.claude-sonnet-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2200,
             "output_usd_micros_per_1k": 11000,
             "cache_read_input_usd_micros_per_1k": 220,
             "cache_write_input_usd_micros_per_1k": 2750,
-        },
-        "batch": {
+        }
+    },  # $2.2/$11 per 1M
+    "au.anthropic.claude-sonnet-5-5": {
+        "standard": {
             "input_usd_micros_per_1k": 2200,
             "output_usd_micros_per_1k": 11000,
-            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_read_input_usd_micros_per_1k": 110,
             "cache_write_input_usd_micros_per_1k": 2750,
-        },
+        }
     },  # $2.2/$11 per 1M
     "claude-sonnet-4-5-20250929-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "cohere.command-light-text-v14": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 300,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
-        },
+        }
     },  # $0.3/$0.6 per 1M
-    "cohere.command-r-plus-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 15000,
-            "cache_write_input_usd_micros_per_1k": 15000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 15000,
-            "cache_write_input_usd_micros_per_1k": 15000,
-        },
-    },  # $3/$15 per 1M
-    "cohere.command-r-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
-        },
-    },  # $0.5/$1.5 per 1M
     "cohere.command-text-v14": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 1500,
+        "standard": {
+            "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 2000,
             "cache_read_input_usd_micros_per_1k": 2000,
             "cache_write_input_usd_micros_per_1k": 2000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1500,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
-        },
-    },  # $1.5/$2 per 1M
+        }
+    },  # $1/$2 per 1M
     "cohere.embed-english-v3": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.1/$0 per 1M
     "cohere.embed-multilingual-v3": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.1/$0 per 1M
     "cohere.embed-v4:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 120,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 120,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.12/$0 per 1M
     "deepseek.r1-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1350,
             "output_usd_micros_per_1k": 5400,
             "cache_read_input_usd_micros_per_1k": 5400,
             "cache_write_input_usd_micros_per_1k": 5400,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1350,
-            "output_usd_micros_per_1k": 5400,
-            "cache_read_input_usd_micros_per_1k": 5400,
-            "cache_write_input_usd_micros_per_1k": 5400,
-        },
+        }
     },  # $1.35/$5.4 per 1M
     "deepseek.v3-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 580,
             "output_usd_micros_per_1k": 1680,
             "cache_read_input_usd_micros_per_1k": 1680,
             "cache_write_input_usd_micros_per_1k": 1680,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 580,
-            "output_usd_micros_per_1k": 1680,
-            "cache_read_input_usd_micros_per_1k": 1680,
-            "cache_write_input_usd_micros_per_1k": 1680,
-        },
+        }
     },  # $0.58/$1.68 per 1M
     "deepseek.v3.2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 620,
             "output_usd_micros_per_1k": 1850,
             "cache_read_input_usd_micros_per_1k": 1850,
             "cache_write_input_usd_micros_per_1k": 1850,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 620,
-            "output_usd_micros_per_1k": 1850,
-            "cache_read_input_usd_micros_per_1k": 1850,
-            "cache_write_input_usd_micros_per_1k": 1850,
+        "flex": {
+            "input_usd_micros_per_1k": 310,
+            "output_usd_micros_per_1k": 925,
+            "cache_read_input_usd_micros_per_1k": 925,
+            "cache_write_input_usd_micros_per_1k": 925,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1085,
+            "output_usd_micros_per_1k": 3238,
+            "cache_read_input_usd_micros_per_1k": 3238,
+            "cache_write_input_usd_micros_per_1k": 3238,
         },
     },  # $0.62/$1.85 per 1M
     "eu.amazon.nova-2-lite-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 330,
-            "output_usd_micros_per_1k": 2750,
-            "cache_read_input_usd_micros_per_1k": 82,
-            "cache_write_input_usd_micros_per_1k": 2750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 330,
-            "output_usd_micros_per_1k": 2750,
-            "cache_read_input_usd_micros_per_1k": 82,
-            "cache_write_input_usd_micros_per_1k": 2750,
-        },
-    },  # $0.33/$2.75 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 429,
+            "output_usd_micros_per_1k": 3597,
+            "cache_read_input_usd_micros_per_1k": 107,
+            "cache_write_input_usd_micros_per_1k": 3597,
+        }
+    },  # $0.429/$3.597 per 1M
     "eu.amazon.nova-2-pro-preview-20251202-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 2188,
-            "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
-            "cache_write_input_usd_micros_per_1k": 17500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2188,
-            "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
-            "cache_write_input_usd_micros_per_1k": 17500,
-        },
-    },  # $2.188/$17.5 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 1375,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 344,
+            "cache_write_input_usd_micros_per_1k": 11000,
+        }
+    },  # $1.375/$11 per 1M
     "eu.amazon.nova-lite-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 78,
             "output_usd_micros_per_1k": 312,
-            "cache_read_input_usd_micros_per_1k": 312,
+            "cache_read_input_usd_micros_per_1k": 20,
             "cache_write_input_usd_micros_per_1k": 312,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 78,
-            "output_usd_micros_per_1k": 312,
-            "cache_read_input_usd_micros_per_1k": 312,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
+        }
     },  # $0.078/$0.312 per 1M
     "eu.amazon.nova-micro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 46,
             "output_usd_micros_per_1k": 184,
-            "cache_read_input_usd_micros_per_1k": 184,
+            "cache_read_input_usd_micros_per_1k": 12,
             "cache_write_input_usd_micros_per_1k": 184,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 46,
-            "output_usd_micros_per_1k": 184,
-            "cache_read_input_usd_micros_per_1k": 184,
-            "cache_write_input_usd_micros_per_1k": 184,
-        },
+        }
     },  # $0.046/$0.184 per 1M
     "eu.amazon.nova-pro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1050,
             "output_usd_micros_per_1k": 4200,
-            "cache_read_input_usd_micros_per_1k": 4200,
+            "cache_read_input_usd_micros_per_1k": 262,
             "cache_write_input_usd_micros_per_1k": 4200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 1050,
-            "output_usd_micros_per_1k": 4200,
-            "cache_read_input_usd_micros_per_1k": 4200,
-            "cache_write_input_usd_micros_per_1k": 4200,
+        "flex": {
+            "input_usd_micros_per_1k": 525,
+            "output_usd_micros_per_1k": 2100,
+            "cache_read_input_usd_micros_per_1k": 131,
+            "cache_write_input_usd_micros_per_1k": 2100,
         },
     },  # $1.05/$4.2 per 1M
     "eu.anthropic.claude-3-5-haiku-20241022-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-    },  # $0.25/$1.25 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 800,
+            "output_usd_micros_per_1k": 4000,
+            "cache_read_input_usd_micros_per_1k": 80,
+            "cache_write_input_usd_micros_per_1k": 1000,
+        }
+    },  # $0.8/$4 per 1M
     "eu.anthropic.claude-3-5-sonnet-20240620-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "eu.anthropic.claude-3-5-sonnet-20241022-v2:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "eu.anthropic.claude-3-7-sonnet-20250219-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
-    "eu.anthropic.claude-3-haiku-20240307-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-    },  # $0.25/$1.25 per 1M
     "eu.anthropic.claude-3-opus-20240229-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
-    "eu.anthropic.claude-3-sonnet-20240229-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-    },  # $3/$15 per 1M
     "eu.anthropic.claude-fable-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 11000,
             "output_usd_micros_per_1k": 55000,
             "cache_read_input_usd_micros_per_1k": 1100,
             "cache_write_input_usd_micros_per_1k": 13750,
-        },
-        "batch": {
+        }
+    },  # $11/$55 per 1M
+    "eu.anthropic.claude-fable-5-1": {
+        "standard": {
             "input_usd_micros_per_1k": 11000,
             "output_usd_micros_per_1k": 55000,
-            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_read_input_usd_micros_per_1k": 275,
             "cache_write_input_usd_micros_per_1k": 13750,
-        },
+        }
     },  # $11/$55 per 1M
     "eu.anthropic.claude-haiku-4-5-20251001-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1100,
             "output_usd_micros_per_1k": 5500,
             "cache_read_input_usd_micros_per_1k": 110,
             "cache_write_input_usd_micros_per_1k": 1375,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1100,
-            "output_usd_micros_per_1k": 5500,
-            "cache_read_input_usd_micros_per_1k": 110,
-            "cache_write_input_usd_micros_per_1k": 1375,
-        },
+        }
     },  # $1.1/$5.5 per 1M
+    "eu.anthropic.claude-haiku-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 550,
+            "cache_read_input_usd_micros_per_1k": 11,
+            "cache_write_input_usd_micros_per_1k": 138,
+        }
+    },  # $0.11/$0.55 per 1M
     "eu.anthropic.claude-opus-4-1-20250805-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
     "eu.anthropic.claude-opus-4-20250514-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
     "eu.anthropic.claude-opus-4-5-20251101-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
-    },  # $5/$25 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 27500,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6875,
+        }
+    },  # $5.5/$27.5 per 1M
     "eu.anthropic.claude-opus-4-6-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
     "eu.anthropic.claude-opus-4-7": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
     "eu.anthropic.claude-opus-4-8": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
+    "eu.anthropic.claude-opus-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 27500,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6875,
+        }
+    },  # $5.5/$27.5 per 1M
+    "eu.anthropic.claude-opus-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
     "eu.anthropic.claude-sonnet-4-20250514-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "eu.anthropic.claude-sonnet-4-5-20250929-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3300,
             "output_usd_micros_per_1k": 16500,
             "cache_read_input_usd_micros_per_1k": 330,
             "cache_write_input_usd_micros_per_1k": 4125,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3300,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 330,
-            "cache_write_input_usd_micros_per_1k": 4125,
-        },
+        }
     },  # $3.3/$16.5 per 1M
     "eu.anthropic.claude-sonnet-4-6": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3300,
             "output_usd_micros_per_1k": 16500,
             "cache_read_input_usd_micros_per_1k": 330,
             "cache_write_input_usd_micros_per_1k": 4125,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3300,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 330,
-            "cache_write_input_usd_micros_per_1k": 4125,
-        },
+        }
     },  # $3.3/$16.5 per 1M
     "eu.anthropic.claude-sonnet-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2200,
             "output_usd_micros_per_1k": 11000,
             "cache_read_input_usd_micros_per_1k": 220,
             "cache_write_input_usd_micros_per_1k": 2750,
-        },
-        "batch": {
+        }
+    },  # $2.2/$11 per 1M
+    "eu.anthropic.claude-sonnet-5-5": {
+        "standard": {
             "input_usd_micros_per_1k": 2200,
             "output_usd_micros_per_1k": 11000,
-            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_read_input_usd_micros_per_1k": 110,
             "cache_write_input_usd_micros_per_1k": 2750,
-        },
+        }
     },  # $2.2/$11 per 1M
     "eu.deepseek.v3.2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 740,
             "output_usd_micros_per_1k": 2220,
             "cache_read_input_usd_micros_per_1k": 2220,
             "cache_write_input_usd_micros_per_1k": 2220,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 740,
-            "output_usd_micros_per_1k": 2220,
-            "cache_read_input_usd_micros_per_1k": 2220,
-            "cache_write_input_usd_micros_per_1k": 2220,
+        "flex": {
+            "input_usd_micros_per_1k": 370,
+            "output_usd_micros_per_1k": 1110,
+            "cache_read_input_usd_micros_per_1k": 1110,
+            "cache_write_input_usd_micros_per_1k": 1110,
         },
     },  # $0.74/$2.22 per 1M
     "eu.meta.llama3-2-1b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 130,
             "output_usd_micros_per_1k": 130,
             "cache_read_input_usd_micros_per_1k": 130,
             "cache_write_input_usd_micros_per_1k": 130,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 130,
-            "output_usd_micros_per_1k": 130,
-            "cache_read_input_usd_micros_per_1k": 130,
-            "cache_write_input_usd_micros_per_1k": 130,
-        },
+        }
     },  # $0.13/$0.13 per 1M
     "eu.meta.llama3-2-3b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 190,
             "output_usd_micros_per_1k": 190,
             "cache_read_input_usd_micros_per_1k": 190,
             "cache_write_input_usd_micros_per_1k": 190,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 190,
-            "output_usd_micros_per_1k": 190,
-            "cache_read_input_usd_micros_per_1k": 190,
-            "cache_write_input_usd_micros_per_1k": 190,
-        },
+        }
     },  # $0.19/$0.19 per 1M
     "eu.mistral.pixtral-large-2502-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2000,
             "output_usd_micros_per_1k": 6000,
             "cache_read_input_usd_micros_per_1k": 6000,
             "cache_write_input_usd_micros_per_1k": 6000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 6000,
-            "cache_read_input_usd_micros_per_1k": 6000,
-            "cache_write_input_usd_micros_per_1k": 6000,
-        },
+        }
     },  # $2/$6 per 1M
-    "eu.twelvelabs.marengo-embed-2-7-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 70000,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 70000,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
-    },  # $70/$0 per 1M
+    "global.amazon.nova-2-5-sonic": {
+        "standard": {
+            "input_usd_micros_per_1k": 330,
+            "output_usd_micros_per_1k": 2750,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $0.33/$2.75 per 1M
     "global.amazon.nova-2-lite-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 300,
             "output_usd_micros_per_1k": 2500,
             "cache_read_input_usd_micros_per_1k": 75,
             "cache_write_input_usd_micros_per_1k": 2500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 2500,
-            "cache_read_input_usd_micros_per_1k": 75,
-            "cache_write_input_usd_micros_per_1k": 2500,
+        "priority": {
+            "input_usd_micros_per_1k": 525,
+            "output_usd_micros_per_1k": 4375,
+            "cache_read_input_usd_micros_per_1k": 131,
+            "cache_write_input_usd_micros_per_1k": 4375,
         },
     },  # $0.3/$2.5 per 1M
     "global.amazon.nova-2-multimodal-embeddings-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 135,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 135,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.135/$0 per 1M
     "global.amazon.nova-2-pro-preview-20251202-v1:0": {
-        "on_demand": {
+        "standard": {
+            "input_usd_micros_per_1k": 1250,
+            "output_usd_micros_per_1k": 10000,
+            "cache_read_input_usd_micros_per_1k": 312,
+            "cache_write_input_usd_micros_per_1k": 10000,
+        },
+        "priority": {
             "input_usd_micros_per_1k": 2188,
             "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
+            "cache_read_input_usd_micros_per_1k": 546,
             "cache_write_input_usd_micros_per_1k": 17500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 2188,
-            "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
-            "cache_write_input_usd_micros_per_1k": 17500,
-        },
-    },  # $2.188/$17.5 per 1M
+    },  # $1.25/$10 per 1M
+    "global.amazon.nova-2-sonic-v1:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 330,
+            "output_usd_micros_per_1k": 2750,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $0.33/$2.75 per 1M
     "global.amazon.nova-lite-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 60,
             "output_usd_micros_per_1k": 240,
-            "cache_read_input_usd_micros_per_1k": 240,
+            "cache_read_input_usd_micros_per_1k": 15,
             "cache_write_input_usd_micros_per_1k": 240,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 60,
-            "output_usd_micros_per_1k": 240,
-            "cache_read_input_usd_micros_per_1k": 240,
-            "cache_write_input_usd_micros_per_1k": 240,
-        },
+        }
     },  # $0.06/$0.24 per 1M
     "global.amazon.nova-micro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 35,
             "output_usd_micros_per_1k": 140,
-            "cache_read_input_usd_micros_per_1k": 140,
+            "cache_read_input_usd_micros_per_1k": 9,
             "cache_write_input_usd_micros_per_1k": 140,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 35,
-            "output_usd_micros_per_1k": 140,
-            "cache_read_input_usd_micros_per_1k": 140,
-            "cache_write_input_usd_micros_per_1k": 140,
-        },
+        }
     },  # $0.035/$0.14 per 1M
+    "global.amazon.nova-premier-v1:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 2500,
+            "output_usd_micros_per_1k": 12500,
+            "cache_read_input_usd_micros_per_1k": 625,
+            "cache_write_input_usd_micros_per_1k": 12500,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 4375,
+            "output_usd_micros_per_1k": 21875,
+            "cache_read_input_usd_micros_per_1k": 1094,
+            "cache_write_input_usd_micros_per_1k": 21875,
+        },
+    },  # $2.5/$12.5 per 1M
     "global.amazon.nova-pro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 3200,
-            "cache_read_input_usd_micros_per_1k": 3200,
+            "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 3200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 3200,
-            "cache_read_input_usd_micros_per_1k": 3200,
-            "cache_write_input_usd_micros_per_1k": 3200,
+        "flex": {
+            "input_usd_micros_per_1k": 400,
+            "output_usd_micros_per_1k": 1600,
+            "cache_read_input_usd_micros_per_1k": 100,
+            "cache_write_input_usd_micros_per_1k": 1600,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1400,
+            "output_usd_micros_per_1k": 5600,
+            "cache_read_input_usd_micros_per_1k": 350,
+            "cache_write_input_usd_micros_per_1k": 5600,
         },
     },  # $0.8/$3.2 per 1M
     "global.amazon.titan-embed-g1-text-02": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.1/$0 per 1M
     "global.amazon.titan-embed-image-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.8/$0 per 1M
     "global.amazon.titan-embed-text-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.1/$0 per 1M
     "global.amazon.titan-embed-text-v2:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 20,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 20,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.02/$0 per 1M
     "global.amazon.titan-text-express-v1": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 1300,
-            "output_usd_micros_per_1k": 1700,
-            "cache_read_input_usd_micros_per_1k": 1700,
-            "cache_write_input_usd_micros_per_1k": 1700,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1300,
-            "output_usd_micros_per_1k": 1700,
-            "cache_read_input_usd_micros_per_1k": 1700,
-            "cache_write_input_usd_micros_per_1k": 1700,
-        },
-    },  # $1.3/$1.7 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 200,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        }
+    },  # $0.2/$0.6 per 1M
     "global.amazon.titan-text-lite-v1": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
-        },
-    },  # $0.3/$0.4 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 200,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 200,
+        }
+    },  # $0.15/$0.2 per 1M
     "global.amazon.titan-text-premier-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1500,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 1500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
-        },
+        }
     },  # $0.5/$1.5 per 1M
     "global.anthropic.claude-3-5-haiku-20241022-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 4000,
             "cache_read_input_usd_micros_per_1k": 80,
             "cache_write_input_usd_micros_per_1k": 1000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 4000,
-            "cache_read_input_usd_micros_per_1k": 80,
-            "cache_write_input_usd_micros_per_1k": 1000,
-        },
+        }
     },  # $0.8/$4 per 1M
     "global.anthropic.claude-3-5-sonnet-20240620-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "global.anthropic.claude-3-5-sonnet-20241022-v2:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "global.anthropic.claude-3-7-sonnet-20240620-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3600,
             "output_usd_micros_per_1k": 18000,
             "cache_read_input_usd_micros_per_1k": 360,
             "cache_write_input_usd_micros_per_1k": 4500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3600,
-            "output_usd_micros_per_1k": 18000,
-            "cache_read_input_usd_micros_per_1k": 360,
-            "cache_write_input_usd_micros_per_1k": 4500,
-        },
+        }
     },  # $3.6/$18 per 1M
     "global.anthropic.claude-3-7-sonnet-20250219-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
-    "global.anthropic.claude-3-haiku-20240307-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-    },  # $0.25/$1.25 per 1M
     "global.anthropic.claude-3-opus-20240229-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
-    "global.anthropic.claude-3-sonnet-20240229-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-    },  # $3/$15 per 1M
     "global.anthropic.claude-fable-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 10000,
             "output_usd_micros_per_1k": 50000,
             "cache_read_input_usd_micros_per_1k": 1000,
             "cache_write_input_usd_micros_per_1k": 12500,
-        },
-        "batch": {
+        }
+    },  # $10/$50 per 1M
+    "global.anthropic.claude-fable-5-1": {
+        "standard": {
             "input_usd_micros_per_1k": 10000,
             "output_usd_micros_per_1k": 50000,
-            "cache_read_input_usd_micros_per_1k": 1000,
+            "cache_read_input_usd_micros_per_1k": 250,
             "cache_write_input_usd_micros_per_1k": 12500,
-        },
+        }
     },  # $10/$50 per 1M
     "global.anthropic.claude-haiku-4-5-20251001-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 5000,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 1250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1000,
-            "output_usd_micros_per_1k": 5000,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 1250,
-        },
+        }
     },  # $1/$5 per 1M
     "global.anthropic.claude-haiku-4-5@20251001": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 5000,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 1250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1000,
-            "output_usd_micros_per_1k": 5000,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 1250,
-        },
+        }
     },  # $1/$5 per 1M
+    "global.anthropic.claude-haiku-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 100,
+            "output_usd_micros_per_1k": 500,
+            "cache_read_input_usd_micros_per_1k": 10,
+            "cache_write_input_usd_micros_per_1k": 125,
+        }
+    },  # $0.1/$0.5 per 1M
     "global.anthropic.claude-instant-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 2400,
             "cache_read_input_usd_micros_per_1k": 2400,
             "cache_write_input_usd_micros_per_1k": 2400,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 2400,
-            "cache_read_input_usd_micros_per_1k": 2400,
-            "cache_write_input_usd_micros_per_1k": 2400,
-        },
+        }
     },  # $0.8/$2.4 per 1M
+    "global.anthropic.claude-mythos-5-1": {
+        "standard": {
+            "input_usd_micros_per_1k": 10000,
+            "output_usd_micros_per_1k": 50000,
+            "cache_read_input_usd_micros_per_1k": 250,
+            "cache_write_input_usd_micros_per_1k": 12500,
+        }
+    },  # $10/$50 per 1M
+    "global.anthropic.claude-mythos-preview": {
+        "standard": {
+            "input_usd_micros_per_1k": 27500,
+            "output_usd_micros_per_1k": 137500,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 34375,
+        }
+    },  # $27.5/$137.5 per 1M
     "global.anthropic.claude-opus-4-1-20250805-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
     "global.anthropic.claude-opus-4-20250514-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
     "global.anthropic.claude-opus-4-5-20251101-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5000,
             "output_usd_micros_per_1k": 25000,
             "cache_read_input_usd_micros_per_1k": 500,
             "cache_write_input_usd_micros_per_1k": 6250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
+        }
     },  # $5/$25 per 1M
     "global.anthropic.claude-opus-4-6-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5000,
             "output_usd_micros_per_1k": 25000,
             "cache_read_input_usd_micros_per_1k": 500,
             "cache_write_input_usd_micros_per_1k": 6250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
+        }
     },  # $5/$25 per 1M
     "global.anthropic.claude-opus-4-7": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5000,
             "output_usd_micros_per_1k": 25000,
             "cache_read_input_usd_micros_per_1k": 500,
             "cache_write_input_usd_micros_per_1k": 6250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
+        }
     },  # $5/$25 per 1M
     "global.anthropic.claude-opus-4-8": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5000,
             "output_usd_micros_per_1k": 25000,
             "cache_read_input_usd_micros_per_1k": 500,
             "cache_write_input_usd_micros_per_1k": 6250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5000,
-            "output_usd_micros_per_1k": 25000,
-            "cache_read_input_usd_micros_per_1k": 500,
-            "cache_write_input_usd_micros_per_1k": 6250,
-        },
+        }
     },  # $5/$25 per 1M
+    "global.anthropic.claude-opus-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5000,
+            "output_usd_micros_per_1k": 25000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6250,
+        }
+    },  # $5/$25 per 1M
+    "global.anthropic.claude-opus-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 4000,
+            "output_usd_micros_per_1k": 20000,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 5000,
+        }
+    },  # $4/$20 per 1M
     "global.anthropic.claude-sonnet-4-20250514-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "global.anthropic.claude-sonnet-4-6": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "global.anthropic.claude-sonnet-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2000,
             "output_usd_micros_per_1k": 10000,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 2500,
-        },
-        "batch": {
+        }
+    },  # $2/$10 per 1M
+    "global.anthropic.claude-sonnet-5-5": {
+        "standard": {
             "input_usd_micros_per_1k": 2000,
             "output_usd_micros_per_1k": 10000,
-            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 2500,
-        },
+        }
     },  # $2/$10 per 1M
     "global.anthropic.claude-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 8000,
             "output_usd_micros_per_1k": 24000,
             "cache_read_input_usd_micros_per_1k": 24000,
             "cache_write_input_usd_micros_per_1k": 24000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
+        }
     },  # $8/$24 per 1M
     "global.anthropic.claude-v2:1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 8000,
             "output_usd_micros_per_1k": 24000,
             "cache_read_input_usd_micros_per_1k": 24000,
             "cache_write_input_usd_micros_per_1k": 24000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
+        }
     },  # $8/$24 per 1M
+    "global.cohere.embed-v4:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 120,
+            "output_usd_micros_per_1k": 0,
+            "cache_read_input_usd_micros_per_1k": 0,
+            "cache_write_input_usd_micros_per_1k": 0,
+        }
+    },  # $0.12/$0 per 1M
+    "global.deepseek.r1-v1:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 1350,
+            "output_usd_micros_per_1k": 5400,
+            "cache_read_input_usd_micros_per_1k": 5400,
+            "cache_write_input_usd_micros_per_1k": 5400,
+        }
+    },  # $1.35/$5.4 per 1M
     "global.deepseek.v3-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 580,
             "output_usd_micros_per_1k": 1680,
             "cache_read_input_usd_micros_per_1k": 1680,
             "cache_write_input_usd_micros_per_1k": 1680,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 580,
-            "output_usd_micros_per_1k": 1680,
-            "cache_read_input_usd_micros_per_1k": 1680,
-            "cache_write_input_usd_micros_per_1k": 1680,
-        },
+        }
     },  # $0.58/$1.68 per 1M
     "global.deepseek.v3.2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 620,
             "output_usd_micros_per_1k": 1850,
             "cache_read_input_usd_micros_per_1k": 1850,
             "cache_write_input_usd_micros_per_1k": 1850,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 620,
-            "output_usd_micros_per_1k": 1850,
-            "cache_read_input_usd_micros_per_1k": 1850,
-            "cache_write_input_usd_micros_per_1k": 1850,
+        "flex": {
+            "input_usd_micros_per_1k": 310,
+            "output_usd_micros_per_1k": 925,
+            "cache_read_input_usd_micros_per_1k": 925,
+            "cache_write_input_usd_micros_per_1k": 925,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1085,
+            "output_usd_micros_per_1k": 3238,
+            "cache_read_input_usd_micros_per_1k": 3238,
+            "cache_write_input_usd_micros_per_1k": 3238,
         },
     },  # $0.62/$1.85 per 1M
     "global.meta.llama2-13b-chat-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 750,
             "output_usd_micros_per_1k": 1000,
             "cache_read_input_usd_micros_per_1k": 1000,
             "cache_write_input_usd_micros_per_1k": 1000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 750,
-            "output_usd_micros_per_1k": 1000,
-            "cache_read_input_usd_micros_per_1k": 1000,
-            "cache_write_input_usd_micros_per_1k": 1000,
-        },
+        }
     },  # $0.75/$1 per 1M
     "global.meta.llama2-70b-chat-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1950,
             "output_usd_micros_per_1k": 2560,
             "cache_read_input_usd_micros_per_1k": 2560,
             "cache_write_input_usd_micros_per_1k": 2560,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1950,
-            "output_usd_micros_per_1k": 2560,
-            "cache_read_input_usd_micros_per_1k": 2560,
-            "cache_write_input_usd_micros_per_1k": 2560,
-        },
+        }
     },  # $1.95/$2.56 per 1M
     "global.meta.llama3-1-405b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 5320,
-            "output_usd_micros_per_1k": 16000,
-            "cache_read_input_usd_micros_per_1k": 16000,
-            "cache_write_input_usd_micros_per_1k": 16000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5320,
-            "output_usd_micros_per_1k": 16000,
-            "cache_read_input_usd_micros_per_1k": 16000,
-            "cache_write_input_usd_micros_per_1k": 16000,
-        },
-    },  # $5.32/$16 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 2400,
+            "output_usd_micros_per_1k": 2400,
+            "cache_read_input_usd_micros_per_1k": 2400,
+            "cache_write_input_usd_micros_per_1k": 2400,
+        }
+    },  # $2.4/$2.4 per 1M
     "global.meta.llama3-1-70b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 990,
-            "output_usd_micros_per_1k": 990,
-            "cache_read_input_usd_micros_per_1k": 990,
-            "cache_write_input_usd_micros_per_1k": 990,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 990,
-            "output_usd_micros_per_1k": 990,
-            "cache_read_input_usd_micros_per_1k": 990,
-            "cache_write_input_usd_micros_per_1k": 990,
-        },
-    },  # $0.99/$0.99 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 720,
+            "output_usd_micros_per_1k": 720,
+            "cache_read_input_usd_micros_per_1k": 720,
+            "cache_write_input_usd_micros_per_1k": 720,
+        }
+    },  # $0.72/$0.72 per 1M
     "global.meta.llama3-1-8b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 220,
             "output_usd_micros_per_1k": 220,
             "cache_read_input_usd_micros_per_1k": 220,
             "cache_write_input_usd_micros_per_1k": 220,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 220,
-            "output_usd_micros_per_1k": 220,
-            "cache_read_input_usd_micros_per_1k": 220,
-            "cache_write_input_usd_micros_per_1k": 220,
-        },
+        }
     },  # $0.22/$0.22 per 1M
     "global.meta.llama3-2-11b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 350,
-            "output_usd_micros_per_1k": 350,
-            "cache_read_input_usd_micros_per_1k": 350,
-            "cache_write_input_usd_micros_per_1k": 350,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 350,
-            "output_usd_micros_per_1k": 350,
-            "cache_read_input_usd_micros_per_1k": 350,
-            "cache_write_input_usd_micros_per_1k": 350,
-        },
-    },  # $0.35/$0.35 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 160,
+            "output_usd_micros_per_1k": 160,
+            "cache_read_input_usd_micros_per_1k": 160,
+            "cache_write_input_usd_micros_per_1k": 160,
+        }
+    },  # $0.16/$0.16 per 1M
     "global.meta.llama3-2-1b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 100,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 100,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 100,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 100,
-        },
+        }
     },  # $0.1/$0.1 per 1M
     "global.meta.llama3-2-3b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 150,
             "cache_read_input_usd_micros_per_1k": 150,
             "cache_write_input_usd_micros_per_1k": 150,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 150,
-            "cache_read_input_usd_micros_per_1k": 150,
-            "cache_write_input_usd_micros_per_1k": 150,
-        },
+        }
     },  # $0.15/$0.15 per 1M
     "global.meta.llama3-2-90b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
-        },
-    },  # $2/$2 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 720,
+            "output_usd_micros_per_1k": 720,
+            "cache_read_input_usd_micros_per_1k": 720,
+            "cache_write_input_usd_micros_per_1k": 720,
+        }
+    },  # $0.72/$0.72 per 1M
     "global.meta.llama3-3-70b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 720,
             "output_usd_micros_per_1k": 720,
             "cache_read_input_usd_micros_per_1k": 720,
             "cache_write_input_usd_micros_per_1k": 720,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 720,
-            "output_usd_micros_per_1k": 720,
-            "cache_read_input_usd_micros_per_1k": 720,
-            "cache_write_input_usd_micros_per_1k": 720,
-        },
+        }
     },  # $0.72/$0.72 per 1M
     "global.meta.llama3-70b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2650,
             "output_usd_micros_per_1k": 3500,
             "cache_read_input_usd_micros_per_1k": 3500,
             "cache_write_input_usd_micros_per_1k": 3500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2650,
-            "output_usd_micros_per_1k": 3500,
-            "cache_read_input_usd_micros_per_1k": 3500,
-            "cache_write_input_usd_micros_per_1k": 3500,
-        },
+        }
     },  # $2.65/$3.5 per 1M
     "global.meta.llama3-8b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 300,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
-        },
+        }
     },  # $0.3/$0.6 per 1M
     "global.meta.llama4-maverick-17b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 240,
             "output_usd_micros_per_1k": 970,
             "cache_read_input_usd_micros_per_1k": 970,
             "cache_write_input_usd_micros_per_1k": 970,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 240,
-            "output_usd_micros_per_1k": 970,
-            "cache_read_input_usd_micros_per_1k": 970,
-            "cache_write_input_usd_micros_per_1k": 970,
-        },
+        }
     },  # $0.24/$0.97 per 1M
     "global.meta.llama4-scout-17b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 170,
             "output_usd_micros_per_1k": 660,
             "cache_read_input_usd_micros_per_1k": 660,
             "cache_write_input_usd_micros_per_1k": 660,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 170,
-            "output_usd_micros_per_1k": 660,
-            "cache_read_input_usd_micros_per_1k": 660,
-            "cache_write_input_usd_micros_per_1k": 660,
-        },
+        }
     },  # $0.17/$0.66 per 1M
     "global.mistral.devstral-2-123b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 400,
             "output_usd_micros_per_1k": 2000,
             "cache_read_input_usd_micros_per_1k": 2000,
             "cache_write_input_usd_micros_per_1k": 2000,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 400,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
+        "flex": {
+            "input_usd_micros_per_1k": 200,
+            "output_usd_micros_per_1k": 1000,
+            "cache_read_input_usd_micros_per_1k": 1000,
+            "cache_write_input_usd_micros_per_1k": 1000,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 700,
+            "output_usd_micros_per_1k": 3500,
+            "cache_read_input_usd_micros_per_1k": 3500,
+            "cache_write_input_usd_micros_per_1k": 3500,
         },
     },  # $0.4/$2 per 1M
     "global.mistral.magistral-small-2509": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1500,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 1500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
+        "flex": {
+            "input_usd_micros_per_1k": 250,
+            "output_usd_micros_per_1k": 750,
+            "cache_read_input_usd_micros_per_1k": 750,
+            "cache_write_input_usd_micros_per_1k": 750,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 880,
+            "output_usd_micros_per_1k": 2630,
+            "cache_read_input_usd_micros_per_1k": 2640,
+            "cache_write_input_usd_micros_per_1k": 2640,
         },
     },  # $0.5/$1.5 per 1M
     "global.mistral.ministral-3-14b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 200,
             "output_usd_micros_per_1k": 200,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 200,
-            "output_usd_micros_per_1k": 200,
-            "cache_read_input_usd_micros_per_1k": 200,
-            "cache_write_input_usd_micros_per_1k": 200,
+        "flex": {
+            "input_usd_micros_per_1k": 100,
+            "output_usd_micros_per_1k": 100,
+            "cache_read_input_usd_micros_per_1k": 100,
+            "cache_write_input_usd_micros_per_1k": 100,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 350,
+            "output_usd_micros_per_1k": 350,
+            "cache_read_input_usd_micros_per_1k": 350,
+            "cache_write_input_usd_micros_per_1k": 350,
         },
     },  # $0.2/$0.2 per 1M
     "global.mistral.ministral-3-3b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 100,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 100,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 100,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 100,
+        "flex": {
+            "input_usd_micros_per_1k": 50,
+            "output_usd_micros_per_1k": 50,
+            "cache_read_input_usd_micros_per_1k": 50,
+            "cache_write_input_usd_micros_per_1k": 50,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 170,
+            "output_usd_micros_per_1k": 170,
+            "cache_read_input_usd_micros_per_1k": 170,
+            "cache_write_input_usd_micros_per_1k": 170,
         },
     },  # $0.1/$0.1 per 1M
     "global.mistral.ministral-3-8b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 150,
             "cache_read_input_usd_micros_per_1k": 150,
             "cache_write_input_usd_micros_per_1k": 150,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 150,
-            "cache_read_input_usd_micros_per_1k": 150,
-            "cache_write_input_usd_micros_per_1k": 150,
+        "flex": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 70,
+            "cache_read_input_usd_micros_per_1k": 70,
+            "cache_write_input_usd_micros_per_1k": 70,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 260,
+            "output_usd_micros_per_1k": 260,
+            "cache_read_input_usd_micros_per_1k": 260,
+            "cache_write_input_usd_micros_per_1k": 260,
         },
     },  # $0.15/$0.15 per 1M
     "global.mistral.mistral-7b-instruct-v0:2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 200,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 200,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 200,
-            "cache_read_input_usd_micros_per_1k": 200,
-            "cache_write_input_usd_micros_per_1k": 200,
-        },
+        }
     },  # $0.15/$0.2 per 1M
     "global.mistral.mistral-large-2402-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
-    },  # $8/$24 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 4000,
+            "output_usd_micros_per_1k": 12000,
+            "cache_read_input_usd_micros_per_1k": 12000,
+            "cache_write_input_usd_micros_per_1k": 12000,
+        }
+    },  # $4/$12 per 1M
     "global.mistral.mistral-large-2407-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 9000,
-            "cache_read_input_usd_micros_per_1k": 9000,
-            "cache_write_input_usd_micros_per_1k": 9000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 9000,
-            "cache_read_input_usd_micros_per_1k": 9000,
-            "cache_write_input_usd_micros_per_1k": 9000,
-        },
-    },  # $3/$9 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 6000,
+            "cache_read_input_usd_micros_per_1k": 6000,
+            "cache_write_input_usd_micros_per_1k": 6000,
+        }
+    },  # $2/$6 per 1M
     "global.mistral.mistral-large-3-675b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1500,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 1500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
+        "flex": {
+            "input_usd_micros_per_1k": 250,
+            "output_usd_micros_per_1k": 750,
+            "cache_read_input_usd_micros_per_1k": 750,
+            "cache_write_input_usd_micros_per_1k": 750,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 880,
+            "output_usd_micros_per_1k": 2630,
+            "cache_read_input_usd_micros_per_1k": 2640,
+            "cache_write_input_usd_micros_per_1k": 2640,
         },
     },  # $0.5/$1.5 per 1M
     "global.mistral.mistral-small-2402-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 3000,
             "cache_read_input_usd_micros_per_1k": 3000,
             "cache_write_input_usd_micros_per_1k": 3000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1000,
-            "output_usd_micros_per_1k": 3000,
-            "cache_read_input_usd_micros_per_1k": 3000,
-            "cache_write_input_usd_micros_per_1k": 3000,
-        },
+        }
     },  # $1/$3 per 1M
     "global.mistral.mixtral-8x7b-instruct-v0:1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 450,
             "output_usd_micros_per_1k": 700,
             "cache_read_input_usd_micros_per_1k": 700,
             "cache_write_input_usd_micros_per_1k": 700,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 450,
-            "output_usd_micros_per_1k": 700,
-            "cache_read_input_usd_micros_per_1k": 700,
-            "cache_write_input_usd_micros_per_1k": 700,
-        },
+        }
     },  # $0.45/$0.7 per 1M
+    "global.mistral.pixtral-large-2502-v1:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 6000,
+            "cache_read_input_usd_micros_per_1k": 6000,
+            "cache_write_input_usd_micros_per_1k": 6000,
+        }
+    },  # $2/$6 per 1M
     "global.mistral.voxtral-mini-3b-2507": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 40,
             "output_usd_micros_per_1k": 40,
             "cache_read_input_usd_micros_per_1k": 40,
             "cache_write_input_usd_micros_per_1k": 40,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 40,
-            "output_usd_micros_per_1k": 40,
-            "cache_read_input_usd_micros_per_1k": 40,
-            "cache_write_input_usd_micros_per_1k": 40,
+        "flex": {
+            "input_usd_micros_per_1k": 20,
+            "output_usd_micros_per_1k": 20,
+            "cache_read_input_usd_micros_per_1k": 20,
+            "cache_write_input_usd_micros_per_1k": 20,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 70,
+            "cache_read_input_usd_micros_per_1k": 70,
+            "cache_write_input_usd_micros_per_1k": 70,
         },
     },  # $0.04/$0.04 per 1M
     "global.mistral.voxtral-small-24b-2507": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 300,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 300,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 300,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 300,
+        "flex": {
+            "input_usd_micros_per_1k": 50,
+            "output_usd_micros_per_1k": 150,
+            "cache_read_input_usd_micros_per_1k": 150,
+            "cache_write_input_usd_micros_per_1k": 150,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 170,
+            "output_usd_micros_per_1k": 520,
+            "cache_read_input_usd_micros_per_1k": 510,
+            "cache_write_input_usd_micros_per_1k": 510,
         },
     },  # $0.1/$0.3 per 1M
+    "global.moonshotai.kimi-k3": {
+        "standard": {
+            "input_usd_micros_per_1k": 3000,
+            "output_usd_micros_per_1k": 15000,
+            "cache_read_input_usd_micros_per_1k": 300,
+            "cache_write_input_usd_micros_per_1k": 3750,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1500,
+            "output_usd_micros_per_1k": 7500,
+            "cache_read_input_usd_micros_per_1k": 150,
+            "cache_write_input_usd_micros_per_1k": 1875,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 5250,
+            "output_usd_micros_per_1k": 26250,
+            "cache_read_input_usd_micros_per_1k": 525,
+            "cache_write_input_usd_micros_per_1k": 6562,
+        },
+    },  # $3/$15 per 1M
+    "global.openai.gpt-5.4": {
+        "standard": {
+            "input_usd_micros_per_1k": 2500,
+            "output_usd_micros_per_1k": 15000,
+            "cache_read_input_usd_micros_per_1k": 250,
+            "cache_write_input_usd_micros_per_1k": 15000,
+        }
+    },  # $2.5/$15 per 1M
+    "global.openai.gpt-5.5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5000,
+            "output_usd_micros_per_1k": 30000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 30000,
+        }
+    },  # $5/$30 per 1M
+    "global.openai.gpt-5.6-luna": {
+        "standard": {
+            "input_usd_micros_per_1k": 200,
+            "output_usd_micros_per_1k": 1200,
+            "cache_read_input_usd_micros_per_1k": 20,
+            "cache_write_input_usd_micros_per_1k": 250,
+        }
+    },  # $0.2/$1.2 per 1M
+    "global.openai.gpt-5.6-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 4000,
+            "output_usd_micros_per_1k": 20000,
+            "cache_read_input_usd_micros_per_1k": 400,
+            "cache_write_input_usd_micros_per_1k": 5000,
+        }
+    },  # $4/$20 per 1M
+    "global.openai.gpt-5.6-terra": {
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 12000,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 2500,
+        }
+    },  # $2/$12 per 1M
+    "global.openai.gpt-6-astra": {
+        "standard": {
+            "input_usd_micros_per_1k": 10000,
+            "output_usd_micros_per_1k": 50000,
+            "cache_read_input_usd_micros_per_1k": 1000,
+            "cache_write_input_usd_micros_per_1k": 12500,
+        }
+    },  # $10/$50 per 1M
+    "global.openai.gpt-6-luna": {
+        "standard": {
+            "input_usd_micros_per_1k": 100,
+            "output_usd_micros_per_1k": 500,
+            "cache_read_input_usd_micros_per_1k": 10,
+            "cache_write_input_usd_micros_per_1k": 125,
+        }
+    },  # $0.1/$0.5 per 1M
+    "global.openai.gpt-6-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 10000,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 2500,
+        }
+    },  # $2/$10 per 1M
+    "global.openai.gpt-6.1-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 10000,
+            "cache_read_input_usd_micros_per_1k": 100,
+            "cache_write_input_usd_micros_per_1k": 2500,
+        }
+    },  # $2/$10 per 1M
+    "global.openai.gpt-6.1-terra": {
+        "standard": {
+            "input_usd_micros_per_1k": 1000,
+            "output_usd_micros_per_1k": 5000,
+            "cache_read_input_usd_micros_per_1k": 50,
+            "cache_write_input_usd_micros_per_1k": 1250,
+        }
+    },  # $1/$5 per 1M
+    "global.writer.palmyra-vision-7b": {
+        "standard": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 75,
+            "output_usd_micros_per_1k": 300,
+            "cache_read_input_usd_micros_per_1k": 300,
+            "cache_write_input_usd_micros_per_1k": 300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
+        },
+    },  # $0.15/$0.6 per 1M
     "global.writer.palmyra-x4-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2500,
             "output_usd_micros_per_1k": 10000,
             "cache_read_input_usd_micros_per_1k": 10000,
             "cache_write_input_usd_micros_per_1k": 10000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2500,
-            "output_usd_micros_per_1k": 10000,
-            "cache_read_input_usd_micros_per_1k": 10000,
-            "cache_write_input_usd_micros_per_1k": 10000,
-        },
+        }
     },  # $2.5/$10 per 1M
     "global.writer.palmyra-x5-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 600,
             "output_usd_micros_per_1k": 6000,
             "cache_read_input_usd_micros_per_1k": 6000,
             "cache_write_input_usd_micros_per_1k": 6000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 600,
-            "output_usd_micros_per_1k": 6000,
-            "cache_read_input_usd_micros_per_1k": 6000,
-            "cache_write_input_usd_micros_per_1k": 6000,
-        },
+        }
     },  # $0.6/$6 per 1M
+    "global.xai.grok-4.6": {
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 6000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6000,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1000,
+            "output_usd_micros_per_1k": 3000,
+            "cache_read_input_usd_micros_per_1k": 250,
+            "cache_write_input_usd_micros_per_1k": 3000,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 3500,
+            "output_usd_micros_per_1k": 10500,
+            "cache_read_input_usd_micros_per_1k": 875,
+            "cache_write_input_usd_micros_per_1k": 10500,
+        },
+    },  # $2/$6 per 1M
+    "global.xai.grok-4.7": {
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 6000,
+            "cache_read_input_usd_micros_per_1k": 500,
+            "cache_write_input_usd_micros_per_1k": 6000,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1000,
+            "output_usd_micros_per_1k": 3000,
+            "cache_read_input_usd_micros_per_1k": 250,
+            "cache_write_input_usd_micros_per_1k": 3000,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 3500,
+            "output_usd_micros_per_1k": 10500,
+            "cache_read_input_usd_micros_per_1k": 875,
+            "cache_write_input_usd_micros_per_1k": 10500,
+        },
+    },  # $2/$6 per 1M
+    "global.zai.glm-5.3": {
+        "standard": {
+            "input_usd_micros_per_1k": 1680,
+            "output_usd_micros_per_1k": 5280,
+            "cache_read_input_usd_micros_per_1k": 312,
+            "cache_write_input_usd_micros_per_1k": 2100,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 840,
+            "output_usd_micros_per_1k": 2640,
+            "cache_read_input_usd_micros_per_1k": 156,
+            "cache_write_input_usd_micros_per_1k": 1050,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 2940,
+            "output_usd_micros_per_1k": 9240,
+            "cache_read_input_usd_micros_per_1k": 546,
+            "cache_write_input_usd_micros_per_1k": 3675,
+        },
+    },  # $1.68/$5.28 per 1M
     "google.gemma-3-12b-it": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 90,
             "output_usd_micros_per_1k": 290,
             "cache_read_input_usd_micros_per_1k": 290,
             "cache_write_input_usd_micros_per_1k": 290,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 90,
-            "output_usd_micros_per_1k": 290,
-            "cache_read_input_usd_micros_per_1k": 290,
-            "cache_write_input_usd_micros_per_1k": 290,
+        "flex": {
+            "input_usd_micros_per_1k": 50,
+            "output_usd_micros_per_1k": 150,
+            "cache_read_input_usd_micros_per_1k": 161,
+            "cache_write_input_usd_micros_per_1k": 161,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 160,
+            "output_usd_micros_per_1k": 510,
+            "cache_read_input_usd_micros_per_1k": 516,
+            "cache_write_input_usd_micros_per_1k": 516,
         },
     },  # $0.09/$0.29 per 1M
     "google.gemma-3-27b-it": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 230,
             "output_usd_micros_per_1k": 380,
             "cache_read_input_usd_micros_per_1k": 380,
             "cache_write_input_usd_micros_per_1k": 380,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 230,
-            "output_usd_micros_per_1k": 380,
-            "cache_read_input_usd_micros_per_1k": 380,
-            "cache_write_input_usd_micros_per_1k": 380,
+        "flex": {
+            "input_usd_micros_per_1k": 120,
+            "output_usd_micros_per_1k": 190,
+            "cache_read_input_usd_micros_per_1k": 198,
+            "cache_write_input_usd_micros_per_1k": 198,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 400,
+            "output_usd_micros_per_1k": 670,
+            "cache_read_input_usd_micros_per_1k": 661,
+            "cache_write_input_usd_micros_per_1k": 661,
         },
     },  # $0.23/$0.38 per 1M
     "google.gemma-3-4b-it": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 40,
             "output_usd_micros_per_1k": 80,
             "cache_read_input_usd_micros_per_1k": 80,
             "cache_write_input_usd_micros_per_1k": 80,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 40,
-            "output_usd_micros_per_1k": 80,
-            "cache_read_input_usd_micros_per_1k": 80,
-            "cache_write_input_usd_micros_per_1k": 80,
+        "flex": {
+            "input_usd_micros_per_1k": 20,
+            "output_usd_micros_per_1k": 40,
+            "cache_read_input_usd_micros_per_1k": 40,
+            "cache_write_input_usd_micros_per_1k": 40,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 140,
+            "cache_read_input_usd_micros_per_1k": 140,
+            "cache_write_input_usd_micros_per_1k": 140,
         },
     },  # $0.04/$0.08 per 1M
+    "in.moonshotai.kimi-k3": {
+        "standard": {
+            "input_usd_micros_per_1k": 3300,
+            "output_usd_micros_per_1k": 16500,
+            "cache_read_input_usd_micros_per_1k": 330,
+            "cache_write_input_usd_micros_per_1k": 4125,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1650,
+            "output_usd_micros_per_1k": 8250,
+            "cache_read_input_usd_micros_per_1k": 165,
+            "cache_write_input_usd_micros_per_1k": 2062,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 5775,
+            "output_usd_micros_per_1k": 28875,
+            "cache_read_input_usd_micros_per_1k": 578,
+            "cache_write_input_usd_micros_per_1k": 7219,
+        },
+    },  # $3.3/$16.5 per 1M
+    "jp.amazon.nova-2-lite-v1:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 396,
+            "output_usd_micros_per_1k": 3311,
+            "cache_read_input_usd_micros_per_1k": 99,
+            "cache_write_input_usd_micros_per_1k": 3311,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 198,
+            "output_usd_micros_per_1k": 1656,
+            "cache_read_input_usd_micros_per_1k": 50,
+            "cache_write_input_usd_micros_per_1k": 1656,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 693,
+            "output_usd_micros_per_1k": 5794,
+            "cache_read_input_usd_micros_per_1k": 173,
+            "cache_write_input_usd_micros_per_1k": 5794,
+        },
+    },  # $0.396/$3.311 per 1M
     "jp.anthropic.claude-haiku-4-5-20251001-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1100,
             "output_usd_micros_per_1k": 5500,
             "cache_read_input_usd_micros_per_1k": 110,
             "cache_write_input_usd_micros_per_1k": 1375,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1100,
-            "output_usd_micros_per_1k": 5500,
-            "cache_read_input_usd_micros_per_1k": 110,
-            "cache_write_input_usd_micros_per_1k": 1375,
-        },
+        }
     },  # $1.1/$5.5 per 1M
+    "jp.anthropic.claude-haiku-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 550,
+            "cache_read_input_usd_micros_per_1k": 11,
+            "cache_write_input_usd_micros_per_1k": 138,
+        }
+    },  # $0.11/$0.55 per 1M
     "jp.anthropic.claude-opus-4-7": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
     "jp.anthropic.claude-opus-4-8": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
+    "jp.anthropic.claude-opus-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 27500,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6875,
+        }
+    },  # $5.5/$27.5 per 1M
+    "jp.anthropic.claude-opus-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
     "jp.anthropic.claude-sonnet-4-5-20250929-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3300,
             "output_usd_micros_per_1k": 16500,
             "cache_read_input_usd_micros_per_1k": 330,
             "cache_write_input_usd_micros_per_1k": 4125,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3300,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 330,
-            "cache_write_input_usd_micros_per_1k": 4125,
-        },
+        }
     },  # $3.3/$16.5 per 1M
     "jp.anthropic.claude-sonnet-4-6": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3300,
             "output_usd_micros_per_1k": 16500,
             "cache_read_input_usd_micros_per_1k": 330,
             "cache_write_input_usd_micros_per_1k": 4125,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3300,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 330,
-            "cache_write_input_usd_micros_per_1k": 4125,
-        },
+        }
     },  # $3.3/$16.5 per 1M
     "jp.anthropic.claude-sonnet-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2200,
             "output_usd_micros_per_1k": 11000,
             "cache_read_input_usd_micros_per_1k": 220,
             "cache_write_input_usd_micros_per_1k": 2750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2200,
-            "output_usd_micros_per_1k": 11000,
-            "cache_read_input_usd_micros_per_1k": 220,
-            "cache_write_input_usd_micros_per_1k": 2750,
-        },
+        }
     },  # $2.2/$11 per 1M
+    "jp.anthropic.claude-sonnet-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 110,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$11 per 1M
+    "mantle/anthropic.claude-haiku-4-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 1000,
+            "output_usd_micros_per_1k": 5000,
+            "cache_read_input_usd_micros_per_1k": 100,
+            "cache_write_input_usd_micros_per_1k": 1250,
+        }
+    },  # $1/$5 per 1M
+    "mantle/anthropic.claude-haiku-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 550,
+            "cache_read_input_usd_micros_per_1k": 11,
+            "cache_write_input_usd_micros_per_1k": 138,
+        }
+    },  # $0.11/$0.55 per 1M
+    "mantle/anthropic.claude-opus-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
+    "mantle/anthropic.claude-sonnet-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 110,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$11 per 1M
+    "mantle/deepseek.v3.1": {
+        "standard": {
+            "input_usd_micros_per_1k": 580,
+            "output_usd_micros_per_1k": 1680,
+            "cache_read_input_usd_micros_per_1k": 1680,
+            "cache_write_input_usd_micros_per_1k": 1680,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 290,
+            "output_usd_micros_per_1k": 840,
+            "cache_read_input_usd_micros_per_1k": 840,
+            "cache_write_input_usd_micros_per_1k": 840,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1015,
+            "output_usd_micros_per_1k": 2940,
+            "cache_read_input_usd_micros_per_1k": 2940,
+            "cache_write_input_usd_micros_per_1k": 2940,
+        },
+    },  # $0.58/$1.68 per 1M
     "mantle/google.gemma-4-26b-a4b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 130,
             "output_usd_micros_per_1k": 400,
             "cache_read_input_usd_micros_per_1k": 400,
             "cache_write_input_usd_micros_per_1k": 400,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 130,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
+        "flex": {
+            "input_usd_micros_per_1k": 65,
+            "output_usd_micros_per_1k": 200,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 200,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 228,
+            "output_usd_micros_per_1k": 700,
+            "cache_read_input_usd_micros_per_1k": 700,
+            "cache_write_input_usd_micros_per_1k": 700,
         },
     },  # $0.13/$0.4 per 1M
     "mantle/google.gemma-4-31b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 140,
             "output_usd_micros_per_1k": 400,
             "cache_read_input_usd_micros_per_1k": 400,
             "cache_write_input_usd_micros_per_1k": 400,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 140,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
+        "flex": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 200,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 200,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 245,
+            "output_usd_micros_per_1k": 700,
+            "cache_read_input_usd_micros_per_1k": 700,
+            "cache_write_input_usd_micros_per_1k": 700,
         },
     },  # $0.14/$0.4 per 1M
     "mantle/google.gemma-4-e2b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 40,
             "output_usd_micros_per_1k": 80,
             "cache_read_input_usd_micros_per_1k": 80,
             "cache_write_input_usd_micros_per_1k": 80,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 40,
-            "output_usd_micros_per_1k": 80,
-            "cache_read_input_usd_micros_per_1k": 80,
-            "cache_write_input_usd_micros_per_1k": 80,
+        "flex": {
+            "input_usd_micros_per_1k": 20,
+            "output_usd_micros_per_1k": 40,
+            "cache_read_input_usd_micros_per_1k": 40,
+            "cache_write_input_usd_micros_per_1k": 40,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 140,
+            "cache_read_input_usd_micros_per_1k": 140,
+            "cache_write_input_usd_micros_per_1k": 140,
         },
     },  # $0.04/$0.08 per 1M
+    "mantle/moonshotai.kimi-k2-thinking": {
+        "standard": {
+            "input_usd_micros_per_1k": 600,
+            "output_usd_micros_per_1k": 2500,
+            "cache_read_input_usd_micros_per_1k": 2500,
+            "cache_write_input_usd_micros_per_1k": 2500,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 300,
+            "output_usd_micros_per_1k": 1250,
+            "cache_read_input_usd_micros_per_1k": 1250,
+            "cache_write_input_usd_micros_per_1k": 1250,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1050,
+            "output_usd_micros_per_1k": 4380,
+            "cache_read_input_usd_micros_per_1k": 4375,
+            "cache_write_input_usd_micros_per_1k": 4375,
+        },
+    },  # $0.6/$2.5 per 1M
     "mantle/openai.gpt-5.4": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2750,
             "output_usd_micros_per_1k": 16500,
             "cache_read_input_usd_micros_per_1k": 275,
             "cache_write_input_usd_micros_per_1k": 16500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2750,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 275,
-            "cache_write_input_usd_micros_per_1k": 16500,
-        },
+        }
     },  # $2.75/$16.5 per 1M
     "mantle/openai.gpt-5.5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 33000,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 33000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 33000,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 33000,
-        },
+        }
     },  # $5.5/$33 per 1M
+    "mantle/openai.gpt-5.6-cyber": {
+        "standard": {
+            "input_usd_micros_per_1k": 13750,
+            "output_usd_micros_per_1k": 82500,
+            "cache_read_input_usd_micros_per_1k": 1375,
+            "cache_write_input_usd_micros_per_1k": 17188,
+        }
+    },  # $13.75/$82.5 per 1M
     "mantle/openai.gpt-5.6-luna": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 1100,
-            "output_usd_micros_per_1k": 6600,
-            "cache_read_input_usd_micros_per_1k": 110,
-            "cache_write_input_usd_micros_per_1k": 1375,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1100,
-            "output_usd_micros_per_1k": 6600,
-            "cache_read_input_usd_micros_per_1k": 110,
-            "cache_write_input_usd_micros_per_1k": 1375,
-        },
-    },  # $1.1/$6.6 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 220,
+            "output_usd_micros_per_1k": 1320,
+            "cache_read_input_usd_micros_per_1k": 22,
+            "cache_write_input_usd_micros_per_1k": 275,
+        }
+    },  # $0.22/$1.32 per 1M
     "mantle/openai.gpt-5.6-sol": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 33000,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 33000,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
-    },  # $5.5/$33 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 440,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
     "mantle/openai.gpt-5.6-terra": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 2750,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 275,
-            "cache_write_input_usd_micros_per_1k": 3438,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2750,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 275,
-            "cache_write_input_usd_micros_per_1k": 3438,
-        },
-    },  # $2.75/$16.5 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 13200,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$13.2 per 1M
+    "mantle/openai.gpt-6-astra": {
+        "standard": {
+            "input_usd_micros_per_1k": 11000,
+            "output_usd_micros_per_1k": 55000,
+            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_write_input_usd_micros_per_1k": 13750,
+        }
+    },  # $11/$55 per 1M
+    "mantle/openai.gpt-6-luna": {
+        "standard": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 550,
+            "cache_read_input_usd_micros_per_1k": 11,
+            "cache_write_input_usd_micros_per_1k": 138,
+        }
+    },  # $0.11/$0.55 per 1M
+    "mantle/openai.gpt-6-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$11 per 1M
+    "mantle/openai.gpt-6.1-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 110,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$11 per 1M
+    "mantle/openai.gpt-6.1-terra": {
+        "standard": {
+            "input_usd_micros_per_1k": 1100,
+            "output_usd_micros_per_1k": 5500,
+            "cache_read_input_usd_micros_per_1k": 55,
+            "cache_write_input_usd_micros_per_1k": 1375,
+        }
+    },  # $1.1/$5.5 per 1M
+    "mantle/openai.gpt-daybreak-blue-5.6-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 440,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
     "mantle/openai.gpt-oss-120b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
+        "flex": {
+            "input_usd_micros_per_1k": 75,
+            "output_usd_micros_per_1k": 300,
+            "cache_read_input_usd_micros_per_1k": 300,
+            "cache_write_input_usd_micros_per_1k": 300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
         },
     },  # $0.15/$0.6 per 1M
     "mantle/openai.gpt-oss-20b": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 75,
+        "standard": {
+            "input_usd_micros_per_1k": 70,
             "output_usd_micros_per_1k": 300,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 300,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 75,
-            "output_usd_micros_per_1k": 300,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 300,
+        "flex": {
+            "input_usd_micros_per_1k": 35,
+            "output_usd_micros_per_1k": 150,
+            "cache_read_input_usd_micros_per_1k": 150,
+            "cache_write_input_usd_micros_per_1k": 150,
         },
-    },  # $0.075/$0.3 per 1M
+        "priority": {
+            "input_usd_micros_per_1k": 122,
+            "output_usd_micros_per_1k": 525,
+            "cache_read_input_usd_micros_per_1k": 525,
+            "cache_write_input_usd_micros_per_1k": 525,
+        },
+    },  # $0.07/$0.3 per 1M
     "mantle/openai.gpt-oss-safeguard-120b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
+        "flex": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 300,
+            "cache_read_input_usd_micros_per_1k": 280,
+            "cache_write_input_usd_micros_per_1k": 280,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 260,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1040,
+            "cache_write_input_usd_micros_per_1k": 1040,
         },
     },  # $0.15/$0.6 per 1M
     "mantle/openai.gpt-oss-safeguard-20b": {
-        "on_demand": {
+        "standard": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 200,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 200,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 30,
+            "output_usd_micros_per_1k": 100,
+            "cache_read_input_usd_micros_per_1k": 86,
+            "cache_write_input_usd_micros_per_1k": 86,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 120,
+            "output_usd_micros_per_1k": 350,
+            "cache_read_input_usd_micros_per_1k": 343,
+            "cache_write_input_usd_micros_per_1k": 343,
+        },
+    },  # $0.07/$0.2 per 1M
+    "mantle/qwen.qwen3-235b-a22b-2507": {
+        "standard": {
+            "input_usd_micros_per_1k": 220,
+            "output_usd_micros_per_1k": 880,
+            "cache_read_input_usd_micros_per_1k": 880,
+            "cache_write_input_usd_micros_per_1k": 880,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 440,
+            "cache_read_input_usd_micros_per_1k": 440,
+            "cache_write_input_usd_micros_per_1k": 440,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 385,
+            "output_usd_micros_per_1k": 1540,
+            "cache_read_input_usd_micros_per_1k": 1540,
+            "cache_write_input_usd_micros_per_1k": 1540,
+        },
+    },  # $0.22/$0.88 per 1M
+    "mantle/qwen.qwen3-32b": {
+        "standard": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "flex": {
             "input_usd_micros_per_1k": 75,
             "output_usd_micros_per_1k": 300,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 300,
         },
-        "batch": {
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
+        },
+    },  # $0.15/$0.6 per 1M
+    "mantle/qwen.qwen3-coder-30b-a3b-instruct": {
+        "standard": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "flex": {
             "input_usd_micros_per_1k": 75,
             "output_usd_micros_per_1k": 300,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 300,
         },
-    },  # $0.075/$0.3 per 1M
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
+        },
+    },  # $0.15/$0.6 per 1M
+    "mantle/qwen.qwen3-coder-480b-a35b-instruct": {
+        "standard": {
+            "input_usd_micros_per_1k": 450,
+            "output_usd_micros_per_1k": 1800,
+            "cache_read_input_usd_micros_per_1k": 1800,
+            "cache_write_input_usd_micros_per_1k": 1800,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 225,
+            "output_usd_micros_per_1k": 900,
+            "cache_read_input_usd_micros_per_1k": 900,
+            "cache_write_input_usd_micros_per_1k": 900,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 788,
+            "output_usd_micros_per_1k": 3150,
+            "cache_read_input_usd_micros_per_1k": 3150,
+            "cache_write_input_usd_micros_per_1k": 3150,
+        },
+    },  # $0.45/$1.8 per 1M
+    "mantle/qwen.qwen3-next-80b-a3b-instruct": {
+        "standard": {
+            "input_usd_micros_per_1k": 140,
+            "output_usd_micros_per_1k": 1200,
+            "cache_read_input_usd_micros_per_1k": 1200,
+            "cache_write_input_usd_micros_per_1k": 1200,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 260,
+            "output_usd_micros_per_1k": 2100,
+            "cache_read_input_usd_micros_per_1k": 2229,
+            "cache_write_input_usd_micros_per_1k": 2229,
+        },
+    },  # $0.14/$1.2 per 1M
+    "mantle/qwen.qwen3-vl-235b-a22b-instruct": {
+        "standard": {
+            "input_usd_micros_per_1k": 530,
+            "output_usd_micros_per_1k": 2660,
+            "cache_read_input_usd_micros_per_1k": 2660,
+            "cache_write_input_usd_micros_per_1k": 2660,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 260,
+            "output_usd_micros_per_1k": 1330,
+            "cache_read_input_usd_micros_per_1k": 1305,
+            "cache_write_input_usd_micros_per_1k": 1305,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 930,
+            "output_usd_micros_per_1k": 4660,
+            "cache_read_input_usd_micros_per_1k": 4668,
+            "cache_write_input_usd_micros_per_1k": 4668,
+        },
+    },  # $0.53/$2.66 per 1M
     "mantle/xai.grok-4.3": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1250,
             "output_usd_micros_per_1k": 2500,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 2500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 1250,
-            "output_usd_micros_per_1k": 2500,
-            "cache_read_input_usd_micros_per_1k": 200,
-            "cache_write_input_usd_micros_per_1k": 2500,
+        "flex": {
+            "input_usd_micros_per_1k": 625,
+            "output_usd_micros_per_1k": 1250,
+            "cache_read_input_usd_micros_per_1k": 100,
+            "cache_write_input_usd_micros_per_1k": 1250,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 2188,
+            "output_usd_micros_per_1k": 4375,
+            "cache_read_input_usd_micros_per_1k": 350,
+            "cache_write_input_usd_micros_per_1k": 4375,
         },
     },  # $1.25/$2.5 per 1M
+    "mantle/xai.grok-4.6": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 6600,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6600,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1100,
+            "output_usd_micros_per_1k": 3300,
+            "cache_read_input_usd_micros_per_1k": 275,
+            "cache_write_input_usd_micros_per_1k": 3300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 3850,
+            "output_usd_micros_per_1k": 11550,
+            "cache_read_input_usd_micros_per_1k": 963,
+            "cache_write_input_usd_micros_per_1k": 11550,
+        },
+    },  # $2.2/$6.6 per 1M
     "meta.llama2-13b-chat-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 750,
             "output_usd_micros_per_1k": 1000,
             "cache_read_input_usd_micros_per_1k": 1000,
             "cache_write_input_usd_micros_per_1k": 1000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 750,
-            "output_usd_micros_per_1k": 1000,
-            "cache_read_input_usd_micros_per_1k": 1000,
-            "cache_write_input_usd_micros_per_1k": 1000,
-        },
+        }
     },  # $0.75/$1 per 1M
     "meta.llama2-70b-chat-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1950,
             "output_usd_micros_per_1k": 2560,
             "cache_read_input_usd_micros_per_1k": 2560,
             "cache_write_input_usd_micros_per_1k": 2560,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1950,
-            "output_usd_micros_per_1k": 2560,
-            "cache_read_input_usd_micros_per_1k": 2560,
-            "cache_write_input_usd_micros_per_1k": 2560,
-        },
+        }
     },  # $1.95/$2.56 per 1M
     "meta.llama3-1-405b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 5320,
-            "output_usd_micros_per_1k": 16000,
-            "cache_read_input_usd_micros_per_1k": 16000,
-            "cache_write_input_usd_micros_per_1k": 16000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5320,
-            "output_usd_micros_per_1k": 16000,
-            "cache_read_input_usd_micros_per_1k": 16000,
-            "cache_write_input_usd_micros_per_1k": 16000,
-        },
-    },  # $5.32/$16 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 2400,
+            "output_usd_micros_per_1k": 2400,
+            "cache_read_input_usd_micros_per_1k": 2400,
+            "cache_write_input_usd_micros_per_1k": 2400,
+        }
+    },  # $2.4/$2.4 per 1M
     "meta.llama3-1-70b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 990,
-            "output_usd_micros_per_1k": 990,
-            "cache_read_input_usd_micros_per_1k": 990,
-            "cache_write_input_usd_micros_per_1k": 990,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 990,
-            "output_usd_micros_per_1k": 990,
-            "cache_read_input_usd_micros_per_1k": 990,
-            "cache_write_input_usd_micros_per_1k": 990,
-        },
-    },  # $0.99/$0.99 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 720,
+            "output_usd_micros_per_1k": 720,
+            "cache_read_input_usd_micros_per_1k": 720,
+            "cache_write_input_usd_micros_per_1k": 720,
+        }
+    },  # $0.72/$0.72 per 1M
     "meta.llama3-1-8b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 220,
             "output_usd_micros_per_1k": 220,
             "cache_read_input_usd_micros_per_1k": 220,
             "cache_write_input_usd_micros_per_1k": 220,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 220,
-            "output_usd_micros_per_1k": 220,
-            "cache_read_input_usd_micros_per_1k": 220,
-            "cache_write_input_usd_micros_per_1k": 220,
-        },
+        }
     },  # $0.22/$0.22 per 1M
     "meta.llama3-2-11b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 350,
-            "output_usd_micros_per_1k": 350,
-            "cache_read_input_usd_micros_per_1k": 350,
-            "cache_write_input_usd_micros_per_1k": 350,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 350,
-            "output_usd_micros_per_1k": 350,
-            "cache_read_input_usd_micros_per_1k": 350,
-            "cache_write_input_usd_micros_per_1k": 350,
-        },
-    },  # $0.35/$0.35 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 160,
+            "output_usd_micros_per_1k": 160,
+            "cache_read_input_usd_micros_per_1k": 160,
+            "cache_write_input_usd_micros_per_1k": 160,
+        }
+    },  # $0.16/$0.16 per 1M
     "meta.llama3-2-1b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 100,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 100,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 100,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 100,
-        },
+        }
     },  # $0.1/$0.1 per 1M
     "meta.llama3-2-3b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 150,
             "cache_read_input_usd_micros_per_1k": 150,
             "cache_write_input_usd_micros_per_1k": 150,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 150,
-            "cache_read_input_usd_micros_per_1k": 150,
-            "cache_write_input_usd_micros_per_1k": 150,
-        },
+        }
     },  # $0.15/$0.15 per 1M
     "meta.llama3-2-90b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
-        },
-    },  # $2/$2 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 720,
+            "output_usd_micros_per_1k": 720,
+            "cache_read_input_usd_micros_per_1k": 720,
+            "cache_write_input_usd_micros_per_1k": 720,
+        }
+    },  # $0.72/$0.72 per 1M
     "meta.llama3-3-70b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 720,
             "output_usd_micros_per_1k": 720,
             "cache_read_input_usd_micros_per_1k": 720,
             "cache_write_input_usd_micros_per_1k": 720,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 720,
-            "output_usd_micros_per_1k": 720,
-            "cache_read_input_usd_micros_per_1k": 720,
-            "cache_write_input_usd_micros_per_1k": 720,
-        },
+        }
     },  # $0.72/$0.72 per 1M
     "meta.llama3-70b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2650,
             "output_usd_micros_per_1k": 3500,
             "cache_read_input_usd_micros_per_1k": 3500,
             "cache_write_input_usd_micros_per_1k": 3500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2650,
-            "output_usd_micros_per_1k": 3500,
-            "cache_read_input_usd_micros_per_1k": 3500,
-            "cache_write_input_usd_micros_per_1k": 3500,
-        },
+        }
     },  # $2.65/$3.5 per 1M
     "meta.llama3-8b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 300,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
-        },
+        }
     },  # $0.3/$0.6 per 1M
     "meta.llama4-maverick-17b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 240,
             "output_usd_micros_per_1k": 970,
             "cache_read_input_usd_micros_per_1k": 970,
             "cache_write_input_usd_micros_per_1k": 970,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 240,
-            "output_usd_micros_per_1k": 970,
-            "cache_read_input_usd_micros_per_1k": 970,
-            "cache_write_input_usd_micros_per_1k": 970,
-        },
+        }
     },  # $0.24/$0.97 per 1M
     "meta.llama4-scout-17b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 170,
             "output_usd_micros_per_1k": 660,
             "cache_read_input_usd_micros_per_1k": 660,
             "cache_write_input_usd_micros_per_1k": 660,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 170,
-            "output_usd_micros_per_1k": 660,
-            "cache_read_input_usd_micros_per_1k": 660,
-            "cache_write_input_usd_micros_per_1k": 660,
-        },
+        }
     },  # $0.17/$0.66 per 1M
     "minimax.minimax-m2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 300,
             "output_usd_micros_per_1k": 1200,
             "cache_read_input_usd_micros_per_1k": 1200,
             "cache_write_input_usd_micros_per_1k": 1200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 1200,
-            "cache_read_input_usd_micros_per_1k": 1200,
-            "cache_write_input_usd_micros_per_1k": 1200,
+        "flex": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 520,
+            "output_usd_micros_per_1k": 2100,
+            "cache_read_input_usd_micros_per_1k": 2080,
+            "cache_write_input_usd_micros_per_1k": 2080,
         },
     },  # $0.3/$1.2 per 1M
     "minimax.minimax-m2.1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 300,
             "output_usd_micros_per_1k": 1200,
             "cache_read_input_usd_micros_per_1k": 1200,
             "cache_write_input_usd_micros_per_1k": 1200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 1200,
-            "cache_read_input_usd_micros_per_1k": 1200,
-            "cache_write_input_usd_micros_per_1k": 1200,
+        "flex": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 525,
+            "output_usd_micros_per_1k": 2100,
+            "cache_read_input_usd_micros_per_1k": 2100,
+            "cache_write_input_usd_micros_per_1k": 2100,
         },
     },  # $0.3/$1.2 per 1M
     "minimax.minimax-m2.5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 300,
             "output_usd_micros_per_1k": 1200,
             "cache_read_input_usd_micros_per_1k": 1200,
             "cache_write_input_usd_micros_per_1k": 1200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 1200,
-            "cache_read_input_usd_micros_per_1k": 1200,
-            "cache_write_input_usd_micros_per_1k": 1200,
+        "flex": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 525,
+            "output_usd_micros_per_1k": 2100,
+            "cache_read_input_usd_micros_per_1k": 2100,
+            "cache_write_input_usd_micros_per_1k": 2100,
         },
     },  # $0.3/$1.2 per 1M
     "mistral.devstral-2-123b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 400,
             "output_usd_micros_per_1k": 2000,
             "cache_read_input_usd_micros_per_1k": 2000,
             "cache_write_input_usd_micros_per_1k": 2000,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 400,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
+        "flex": {
+            "input_usd_micros_per_1k": 200,
+            "output_usd_micros_per_1k": 1000,
+            "cache_read_input_usd_micros_per_1k": 1000,
+            "cache_write_input_usd_micros_per_1k": 1000,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 700,
+            "output_usd_micros_per_1k": 3500,
+            "cache_read_input_usd_micros_per_1k": 3500,
+            "cache_write_input_usd_micros_per_1k": 3500,
         },
     },  # $0.4/$2 per 1M
     "mistral.magistral-small-2509": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1500,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 1500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
+        "flex": {
+            "input_usd_micros_per_1k": 250,
+            "output_usd_micros_per_1k": 750,
+            "cache_read_input_usd_micros_per_1k": 750,
+            "cache_write_input_usd_micros_per_1k": 750,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 880,
+            "output_usd_micros_per_1k": 2630,
+            "cache_read_input_usd_micros_per_1k": 2640,
+            "cache_write_input_usd_micros_per_1k": 2640,
         },
     },  # $0.5/$1.5 per 1M
     "mistral.ministral-3-14b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 200,
             "output_usd_micros_per_1k": 200,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 200,
-            "output_usd_micros_per_1k": 200,
-            "cache_read_input_usd_micros_per_1k": 200,
-            "cache_write_input_usd_micros_per_1k": 200,
+        "flex": {
+            "input_usd_micros_per_1k": 100,
+            "output_usd_micros_per_1k": 100,
+            "cache_read_input_usd_micros_per_1k": 100,
+            "cache_write_input_usd_micros_per_1k": 100,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 350,
+            "output_usd_micros_per_1k": 350,
+            "cache_read_input_usd_micros_per_1k": 350,
+            "cache_write_input_usd_micros_per_1k": 350,
         },
     },  # $0.2/$0.2 per 1M
     "mistral.ministral-3-3b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 100,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 100,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 100,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 100,
+        "flex": {
+            "input_usd_micros_per_1k": 50,
+            "output_usd_micros_per_1k": 50,
+            "cache_read_input_usd_micros_per_1k": 50,
+            "cache_write_input_usd_micros_per_1k": 50,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 170,
+            "output_usd_micros_per_1k": 170,
+            "cache_read_input_usd_micros_per_1k": 170,
+            "cache_write_input_usd_micros_per_1k": 170,
         },
     },  # $0.1/$0.1 per 1M
     "mistral.ministral-3-8b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 150,
             "cache_read_input_usd_micros_per_1k": 150,
             "cache_write_input_usd_micros_per_1k": 150,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 150,
-            "cache_read_input_usd_micros_per_1k": 150,
-            "cache_write_input_usd_micros_per_1k": 150,
+        "flex": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 70,
+            "cache_read_input_usd_micros_per_1k": 70,
+            "cache_write_input_usd_micros_per_1k": 70,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 260,
+            "output_usd_micros_per_1k": 260,
+            "cache_read_input_usd_micros_per_1k": 260,
+            "cache_write_input_usd_micros_per_1k": 260,
         },
     },  # $0.15/$0.15 per 1M
     "mistral.mistral-7b-instruct-v0:2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 200,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 200,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 200,
-            "cache_read_input_usd_micros_per_1k": 200,
-            "cache_write_input_usd_micros_per_1k": 200,
-        },
+        }
     },  # $0.15/$0.2 per 1M
     "mistral.mistral-large-2402-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
-    },  # $8/$24 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 4000,
+            "output_usd_micros_per_1k": 12000,
+            "cache_read_input_usd_micros_per_1k": 12000,
+            "cache_write_input_usd_micros_per_1k": 12000,
+        }
+    },  # $4/$12 per 1M
     "mistral.mistral-large-2407-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 9000,
-            "cache_read_input_usd_micros_per_1k": 9000,
-            "cache_write_input_usd_micros_per_1k": 9000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 9000,
-            "cache_read_input_usd_micros_per_1k": 9000,
-            "cache_write_input_usd_micros_per_1k": 9000,
-        },
-    },  # $3/$9 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 6000,
+            "cache_read_input_usd_micros_per_1k": 6000,
+            "cache_write_input_usd_micros_per_1k": 6000,
+        }
+    },  # $2/$6 per 1M
     "mistral.mistral-large-3-675b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1500,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 1500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
+        "flex": {
+            "input_usd_micros_per_1k": 250,
+            "output_usd_micros_per_1k": 750,
+            "cache_read_input_usd_micros_per_1k": 750,
+            "cache_write_input_usd_micros_per_1k": 750,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 880,
+            "output_usd_micros_per_1k": 2630,
+            "cache_read_input_usd_micros_per_1k": 2640,
+            "cache_write_input_usd_micros_per_1k": 2640,
         },
     },  # $0.5/$1.5 per 1M
     "mistral.mistral-small-2402-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 3000,
             "cache_read_input_usd_micros_per_1k": 3000,
             "cache_write_input_usd_micros_per_1k": 3000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1000,
-            "output_usd_micros_per_1k": 3000,
-            "cache_read_input_usd_micros_per_1k": 3000,
-            "cache_write_input_usd_micros_per_1k": 3000,
-        },
+        }
     },  # $1/$3 per 1M
     "mistral.mixtral-8x7b-instruct-v0:1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 450,
             "output_usd_micros_per_1k": 700,
             "cache_read_input_usd_micros_per_1k": 700,
             "cache_write_input_usd_micros_per_1k": 700,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 450,
-            "output_usd_micros_per_1k": 700,
-            "cache_read_input_usd_micros_per_1k": 700,
-            "cache_write_input_usd_micros_per_1k": 700,
-        },
+        }
     },  # $0.45/$0.7 per 1M
     "mistral.pixtral-large-2502-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2000,
             "output_usd_micros_per_1k": 6000,
             "cache_read_input_usd_micros_per_1k": 6000,
             "cache_write_input_usd_micros_per_1k": 6000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 6000,
-            "cache_read_input_usd_micros_per_1k": 6000,
-            "cache_write_input_usd_micros_per_1k": 6000,
-        },
+        }
     },  # $2/$6 per 1M
     "mistral.voxtral-mini-3b-2507": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 40,
             "output_usd_micros_per_1k": 40,
             "cache_read_input_usd_micros_per_1k": 40,
             "cache_write_input_usd_micros_per_1k": 40,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 40,
-            "output_usd_micros_per_1k": 40,
-            "cache_read_input_usd_micros_per_1k": 40,
-            "cache_write_input_usd_micros_per_1k": 40,
+        "flex": {
+            "input_usd_micros_per_1k": 20,
+            "output_usd_micros_per_1k": 20,
+            "cache_read_input_usd_micros_per_1k": 20,
+            "cache_write_input_usd_micros_per_1k": 20,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 70,
+            "cache_read_input_usd_micros_per_1k": 70,
+            "cache_write_input_usd_micros_per_1k": 70,
         },
     },  # $0.04/$0.04 per 1M
     "mistral.voxtral-small-24b-2507": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 300,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 300,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 300,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 300,
+        "flex": {
+            "input_usd_micros_per_1k": 50,
+            "output_usd_micros_per_1k": 150,
+            "cache_read_input_usd_micros_per_1k": 150,
+            "cache_write_input_usd_micros_per_1k": 150,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 170,
+            "output_usd_micros_per_1k": 520,
+            "cache_read_input_usd_micros_per_1k": 510,
+            "cache_write_input_usd_micros_per_1k": 510,
         },
     },  # $0.1/$0.3 per 1M
     "moonshot.kimi-k2-thinking": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 600,
             "output_usd_micros_per_1k": 2500,
             "cache_read_input_usd_micros_per_1k": 2500,
             "cache_write_input_usd_micros_per_1k": 2500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 600,
-            "output_usd_micros_per_1k": 2500,
-            "cache_read_input_usd_micros_per_1k": 2500,
-            "cache_write_input_usd_micros_per_1k": 2500,
+        "priority": {
+            "input_usd_micros_per_1k": 1050,
+            "output_usd_micros_per_1k": 4380,
+            "cache_read_input_usd_micros_per_1k": 4375,
+            "cache_write_input_usd_micros_per_1k": 4375,
         },
     },  # $0.6/$2.5 per 1M
     "moonshotai.kimi-k2-thinking": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 730,
-            "output_usd_micros_per_1k": 3030,
-            "cache_read_input_usd_micros_per_1k": 3030,
-            "cache_write_input_usd_micros_per_1k": 3030,
+        "standard": {
+            "input_usd_micros_per_1k": 600,
+            "output_usd_micros_per_1k": 2500,
+            "cache_read_input_usd_micros_per_1k": 2500,
+            "cache_write_input_usd_micros_per_1k": 2500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 730,
-            "output_usd_micros_per_1k": 3030,
-            "cache_read_input_usd_micros_per_1k": 3030,
-            "cache_write_input_usd_micros_per_1k": 3030,
+        "flex": {
+            "input_usd_micros_per_1k": 300,
+            "output_usd_micros_per_1k": 1250,
+            "cache_read_input_usd_micros_per_1k": 1250,
+            "cache_write_input_usd_micros_per_1k": 1250,
         },
-    },  # $0.73/$3.03 per 1M
+    },  # $0.6/$2.5 per 1M
     "moonshotai.kimi-k2.5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 600,
             "output_usd_micros_per_1k": 3000,
             "cache_read_input_usd_micros_per_1k": 3000,
             "cache_write_input_usd_micros_per_1k": 3000,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 600,
-            "output_usd_micros_per_1k": 3000,
-            "cache_read_input_usd_micros_per_1k": 3000,
-            "cache_write_input_usd_micros_per_1k": 3000,
+        "flex": {
+            "input_usd_micros_per_1k": 300,
+            "output_usd_micros_per_1k": 1500,
+            "cache_read_input_usd_micros_per_1k": 1500,
+            "cache_write_input_usd_micros_per_1k": 1500,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1050,
+            "output_usd_micros_per_1k": 5250,
+            "cache_read_input_usd_micros_per_1k": 5250,
+            "cache_write_input_usd_micros_per_1k": 5250,
         },
     },  # $0.6/$3 per 1M
+    "moonshotai.kimi-k3": {
+        "standard": {
+            "input_usd_micros_per_1k": 3300,
+            "output_usd_micros_per_1k": 16500,
+            "cache_read_input_usd_micros_per_1k": 330,
+            "cache_write_input_usd_micros_per_1k": 4125,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1650,
+            "output_usd_micros_per_1k": 8250,
+            "cache_read_input_usd_micros_per_1k": 165,
+            "cache_write_input_usd_micros_per_1k": 2062,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 5775,
+            "output_usd_micros_per_1k": 28875,
+            "cache_read_input_usd_micros_per_1k": 578,
+            "cache_write_input_usd_micros_per_1k": 7219,
+        },
+    },  # $3.3/$16.5 per 1M
     "nvidia.nemotron-nano-12b-v2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 200,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 200,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
+        "flex": {
+            "input_usd_micros_per_1k": 100,
+            "output_usd_micros_per_1k": 300,
+            "cache_read_input_usd_micros_per_1k": 300,
+            "cache_write_input_usd_micros_per_1k": 300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 350,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
         },
     },  # $0.2/$0.6 per 1M
     "nvidia.nemotron-nano-3-30b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 60,
             "output_usd_micros_per_1k": 240,
             "cache_read_input_usd_micros_per_1k": 240,
             "cache_write_input_usd_micros_per_1k": 240,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 60,
-            "output_usd_micros_per_1k": 240,
-            "cache_read_input_usd_micros_per_1k": 240,
-            "cache_write_input_usd_micros_per_1k": 240,
+        "flex": {
+            "input_usd_micros_per_1k": 30,
+            "output_usd_micros_per_1k": 120,
+            "cache_read_input_usd_micros_per_1k": 120,
+            "cache_write_input_usd_micros_per_1k": 120,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 420,
+            "cache_read_input_usd_micros_per_1k": 440,
+            "cache_write_input_usd_micros_per_1k": 440,
         },
     },  # $0.06/$0.24 per 1M
     "nvidia.nemotron-nano-9b-v2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 60,
             "output_usd_micros_per_1k": 230,
             "cache_read_input_usd_micros_per_1k": 230,
             "cache_write_input_usd_micros_per_1k": 230,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 60,
-            "output_usd_micros_per_1k": 230,
-            "cache_read_input_usd_micros_per_1k": 230,
-            "cache_write_input_usd_micros_per_1k": 230,
+        "flex": {
+            "input_usd_micros_per_1k": 30,
+            "output_usd_micros_per_1k": 120,
+            "cache_read_input_usd_micros_per_1k": 115,
+            "cache_write_input_usd_micros_per_1k": 115,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 400,
+            "cache_read_input_usd_micros_per_1k": 422,
+            "cache_write_input_usd_micros_per_1k": 422,
         },
     },  # $0.06/$0.23 per 1M
     "nvidia.nemotron-super-3-120b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 650,
             "cache_read_input_usd_micros_per_1k": 650,
             "cache_write_input_usd_micros_per_1k": 650,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 650,
-            "cache_read_input_usd_micros_per_1k": 650,
-            "cache_write_input_usd_micros_per_1k": 650,
+        "flex": {
+            "input_usd_micros_per_1k": 75,
+            "output_usd_micros_per_1k": 325,
+            "cache_read_input_usd_micros_per_1k": 325,
+            "cache_write_input_usd_micros_per_1k": 325,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1138,
+            "cache_read_input_usd_micros_per_1k": 1138,
+            "cache_write_input_usd_micros_per_1k": 1138,
         },
     },  # $0.15/$0.65 per 1M
+    "openai.gpt-5.4": {
+        "standard": {
+            "input_usd_micros_per_1k": 2750,
+            "output_usd_micros_per_1k": 16500,
+            "cache_read_input_usd_micros_per_1k": 275,
+            "cache_write_input_usd_micros_per_1k": 16500,
+        }
+    },  # $2.75/$16.5 per 1M
+    "openai.gpt-5.5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 33000,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 33000,
+        }
+    },  # $5.5/$33 per 1M
+    "openai.gpt-5.6-luna": {
+        "standard": {
+            "input_usd_micros_per_1k": 220,
+            "output_usd_micros_per_1k": 1320,
+            "cache_read_input_usd_micros_per_1k": 22,
+            "cache_write_input_usd_micros_per_1k": 275,
+        }
+    },  # $0.22/$1.32 per 1M
+    "openai.gpt-5.6-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 440,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
+    "openai.gpt-5.6-terra": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 13200,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$13.2 per 1M
+    "openai.gpt-6-astra": {
+        "standard": {
+            "input_usd_micros_per_1k": 11000,
+            "output_usd_micros_per_1k": 55000,
+            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_write_input_usd_micros_per_1k": 13750,
+        }
+    },  # $11/$55 per 1M
+    "openai.gpt-6-luna": {
+        "standard": {
+            "input_usd_micros_per_1k": 100,
+            "output_usd_micros_per_1k": 500,
+            "cache_read_input_usd_micros_per_1k": 10,
+            "cache_write_input_usd_micros_per_1k": 125,
+        }
+    },  # $0.1/$0.5 per 1M
+    "openai.gpt-6-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 10000,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 2500,
+        }
+    },  # $2/$10 per 1M
+    "openai.gpt-6.1-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 110,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$11 per 1M
+    "openai.gpt-6.1-terra": {
+        "standard": {
+            "input_usd_micros_per_1k": 1100,
+            "output_usd_micros_per_1k": 5500,
+            "cache_read_input_usd_micros_per_1k": 55,
+            "cache_write_input_usd_micros_per_1k": 1375,
+        }
+    },  # $1.1/$5.5 per 1M
     "openai.gpt-oss-120b-1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
+        "flex": {
+            "input_usd_micros_per_1k": 75,
+            "output_usd_micros_per_1k": 300,
+            "cache_read_input_usd_micros_per_1k": 300,
+            "cache_write_input_usd_micros_per_1k": 300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
         },
     },  # $0.15/$0.6 per 1M
     "openai.gpt-oss-20b-1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 70,
             "output_usd_micros_per_1k": 300,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 300,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 70,
-            "output_usd_micros_per_1k": 300,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 300,
+        "flex": {
+            "input_usd_micros_per_1k": 35,
+            "output_usd_micros_per_1k": 150,
+            "cache_read_input_usd_micros_per_1k": 150,
+            "cache_write_input_usd_micros_per_1k": 150,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 122,
+            "output_usd_micros_per_1k": 525,
+            "cache_read_input_usd_micros_per_1k": 525,
+            "cache_write_input_usd_micros_per_1k": 525,
         },
     },  # $0.07/$0.3 per 1M
     "openai.gpt-oss-safeguard-120b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
+        "flex": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 300,
+            "cache_read_input_usd_micros_per_1k": 280,
+            "cache_write_input_usd_micros_per_1k": 280,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 260,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1040,
+            "cache_write_input_usd_micros_per_1k": 1040,
         },
     },  # $0.15/$0.6 per 1M
     "openai.gpt-oss-safeguard-20b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 70,
             "output_usd_micros_per_1k": 200,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 70,
-            "output_usd_micros_per_1k": 200,
-            "cache_read_input_usd_micros_per_1k": 200,
-            "cache_write_input_usd_micros_per_1k": 200,
+        "flex": {
+            "input_usd_micros_per_1k": 30,
+            "output_usd_micros_per_1k": 100,
+            "cache_read_input_usd_micros_per_1k": 86,
+            "cache_write_input_usd_micros_per_1k": 86,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 120,
+            "output_usd_micros_per_1k": 350,
+            "cache_read_input_usd_micros_per_1k": 343,
+            "cache_write_input_usd_micros_per_1k": 343,
         },
     },  # $0.07/$0.2 per 1M
     "qwen.qwen3-235b-a22b-2507-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 220,
             "output_usd_micros_per_1k": 880,
             "cache_read_input_usd_micros_per_1k": 880,
             "cache_write_input_usd_micros_per_1k": 880,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 220,
-            "output_usd_micros_per_1k": 880,
-            "cache_read_input_usd_micros_per_1k": 880,
-            "cache_write_input_usd_micros_per_1k": 880,
+        "flex": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 440,
+            "cache_read_input_usd_micros_per_1k": 440,
+            "cache_write_input_usd_micros_per_1k": 440,
         },
     },  # $0.22/$0.88 per 1M
     "qwen.qwen3-32b-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
+        "flex": {
+            "input_usd_micros_per_1k": 75,
+            "output_usd_micros_per_1k": 300,
+            "cache_read_input_usd_micros_per_1k": 300,
+            "cache_write_input_usd_micros_per_1k": 300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
         },
     },  # $0.15/$0.6 per 1M
     "qwen.qwen3-coder-30b-a3b-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
         },
     },  # $0.15/$0.6 per 1M
     "qwen.qwen3-coder-480b-a35b-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 220,
+        "standard": {
+            "input_usd_micros_per_1k": 450,
             "output_usd_micros_per_1k": 1800,
             "cache_read_input_usd_micros_per_1k": 1800,
             "cache_write_input_usd_micros_per_1k": 1800,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 220,
-            "output_usd_micros_per_1k": 1800,
-            "cache_read_input_usd_micros_per_1k": 1800,
-            "cache_write_input_usd_micros_per_1k": 1800,
-        },
-    },  # $0.22/$1.8 per 1M
+        }
+    },  # $0.45/$1.8 per 1M
     "qwen.qwen3-coder-next": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1200,
             "cache_read_input_usd_micros_per_1k": 1200,
             "cache_write_input_usd_micros_per_1k": 1200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1200,
-            "cache_read_input_usd_micros_per_1k": 1200,
-            "cache_write_input_usd_micros_per_1k": 1200,
+        "flex": {
+            "input_usd_micros_per_1k": 250,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 875,
+            "output_usd_micros_per_1k": 2100,
+            "cache_read_input_usd_micros_per_1k": 2100,
+            "cache_write_input_usd_micros_per_1k": 2100,
         },
     },  # $0.5/$1.2 per 1M
     "qwen.qwen3-next-80b-a3b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 1200,
             "cache_read_input_usd_micros_per_1k": 1200,
             "cache_write_input_usd_micros_per_1k": 1200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 1200,
-            "cache_read_input_usd_micros_per_1k": 1200,
-            "cache_write_input_usd_micros_per_1k": 1200,
+        "flex": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 560,
+            "cache_write_input_usd_micros_per_1k": 560,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 260,
+            "output_usd_micros_per_1k": 2100,
+            "cache_read_input_usd_micros_per_1k": 2080,
+            "cache_write_input_usd_micros_per_1k": 2080,
         },
     },  # $0.15/$1.2 per 1M
     "qwen.qwen3-vl-235b-a22b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 530,
             "output_usd_micros_per_1k": 2660,
             "cache_read_input_usd_micros_per_1k": 2660,
             "cache_write_input_usd_micros_per_1k": 2660,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 530,
-            "output_usd_micros_per_1k": 2660,
-            "cache_read_input_usd_micros_per_1k": 2660,
-            "cache_write_input_usd_micros_per_1k": 2660,
+        "priority": {
+            "input_usd_micros_per_1k": 930,
+            "output_usd_micros_per_1k": 4660,
+            "cache_read_input_usd_micros_per_1k": 4668,
+            "cache_write_input_usd_micros_per_1k": 4668,
         },
     },  # $0.53/$2.66 per 1M
-    "twelvelabs.marengo-embed-2-7-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 70000,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 70000,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
-    },  # $70/$0 per 1M
+    "us-gov.anthropic.claude-fable-5-1": {
+        "standard": {
+            "input_usd_micros_per_1k": 12000,
+            "output_usd_micros_per_1k": 60000,
+            "cache_read_input_usd_micros_per_1k": 300,
+            "cache_write_input_usd_micros_per_1k": 15000,
+        }
+    },  # $12/$60 per 1M
+    "us-gov.anthropic.claude-haiku-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 120,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 12,
+            "cache_write_input_usd_micros_per_1k": 150,
+        }
+    },  # $0.12/$0.6 per 1M
+    "us-gov.anthropic.claude-opus-4-8": {
+        "standard": {
+            "input_usd_micros_per_1k": 6000,
+            "output_usd_micros_per_1k": 30000,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 7500,
+        }
+    },  # $6/$30 per 1M
+    "us-gov.anthropic.claude-opus-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 6000,
+            "output_usd_micros_per_1k": 30000,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 7500,
+        }
+    },  # $6/$30 per 1M
+    "us-gov.anthropic.claude-opus-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 4800,
+            "output_usd_micros_per_1k": 24000,
+            "cache_read_input_usd_micros_per_1k": 240,
+            "cache_write_input_usd_micros_per_1k": 6000,
+        }
+    },  # $4.8/$24 per 1M
     "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3600,
             "output_usd_micros_per_1k": 18000,
             "cache_read_input_usd_micros_per_1k": 360,
             "cache_write_input_usd_micros_per_1k": 4500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3600,
-            "output_usd_micros_per_1k": 18000,
-            "cache_read_input_usd_micros_per_1k": 360,
-            "cache_write_input_usd_micros_per_1k": 4500,
-        },
+        }
     },  # $3.6/$18 per 1M
+    "us-gov.anthropic.claude-sonnet-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 2400,
+            "output_usd_micros_per_1k": 12000,
+            "cache_read_input_usd_micros_per_1k": 240,
+            "cache_write_input_usd_micros_per_1k": 3000,
+        }
+    },  # $2.4/$12 per 1M
+    "us-gov.anthropic.claude-sonnet-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 2400,
+            "output_usd_micros_per_1k": 12000,
+            "cache_read_input_usd_micros_per_1k": 120,
+            "cache_write_input_usd_micros_per_1k": 3000,
+        }
+    },  # $2.4/$12 per 1M
+    "us-gov.nvidia.nemotron-nano-12b-v2": {
+        "standard": {
+            "input_usd_micros_per_1k": 240,
+            "output_usd_micros_per_1k": 720,
+            "cache_read_input_usd_micros_per_1k": 720,
+            "cache_write_input_usd_micros_per_1k": 720,
+        }
+    },  # $0.24/$0.72 per 1M
+    "us-gov.nvidia.nemotron-nano-3-30b": {
+        "standard": {
+            "input_usd_micros_per_1k": 72,
+            "output_usd_micros_per_1k": 288,
+            "cache_read_input_usd_micros_per_1k": 288,
+            "cache_write_input_usd_micros_per_1k": 288,
+        }
+    },  # $0.072/$0.288 per 1M
+    "us-gov.nvidia.nemotron-nano-9b-v2": {
+        "standard": {
+            "input_usd_micros_per_1k": 72,
+            "output_usd_micros_per_1k": 276,
+            "cache_read_input_usd_micros_per_1k": 276,
+            "cache_write_input_usd_micros_per_1k": 276,
+        }
+    },  # $0.072/$0.276 per 1M
+    "us-gov.nvidia.nemotron-super-3-120b": {
+        "standard": {
+            "input_usd_micros_per_1k": 180,
+            "output_usd_micros_per_1k": 780,
+            "cache_read_input_usd_micros_per_1k": 780,
+            "cache_write_input_usd_micros_per_1k": 780,
+        }
+    },  # $0.18/$0.78 per 1M
+    "us-gov.openai.gpt-oss-120b-1:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 180,
+            "output_usd_micros_per_1k": 720,
+            "cache_read_input_usd_micros_per_1k": 720,
+            "cache_write_input_usd_micros_per_1k": 720,
+        }
+    },  # $0.18/$0.72 per 1M
+    "us-gov.openai.gpt-oss-20b-1:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 84,
+            "output_usd_micros_per_1k": 360,
+            "cache_read_input_usd_micros_per_1k": 360,
+            "cache_write_input_usd_micros_per_1k": 360,
+        }
+    },  # $0.084/$0.36 per 1M
+    "us-gov.xai.grok-4.6": {
+        "standard": {
+            "input_usd_micros_per_1k": 2640,
+            "output_usd_micros_per_1k": 7920,
+            "cache_read_input_usd_micros_per_1k": 660,
+            "cache_write_input_usd_micros_per_1k": 7920,
+        }
+    },  # $2.64/$7.92 per 1M
+    "us.amazon.nova-2-5-sonic": {
+        "standard": {
+            "input_usd_micros_per_1k": 330,
+            "output_usd_micros_per_1k": 2750,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $0.33/$2.75 per 1M
     "us.amazon.nova-2-lite-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 330,
             "output_usd_micros_per_1k": 2750,
             "cache_read_input_usd_micros_per_1k": 82,
             "cache_write_input_usd_micros_per_1k": 2750,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 330,
-            "output_usd_micros_per_1k": 2750,
-            "cache_read_input_usd_micros_per_1k": 82,
-            "cache_write_input_usd_micros_per_1k": 2750,
+        "flex": {
+            "input_usd_micros_per_1k": 165,
+            "output_usd_micros_per_1k": 1375,
+            "cache_read_input_usd_micros_per_1k": 41,
+            "cache_write_input_usd_micros_per_1k": 1375,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 578,
+            "output_usd_micros_per_1k": 4812,
+            "cache_read_input_usd_micros_per_1k": 144,
+            "cache_write_input_usd_micros_per_1k": 4812,
         },
     },  # $0.33/$2.75 per 1M
     "us.amazon.nova-2-multimodal-embeddings-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 135,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 135,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.135/$0 per 1M
     "us.amazon.nova-2-pro-preview-20251202-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 2188,
-            "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
-            "cache_write_input_usd_micros_per_1k": 17500,
+        "standard": {
+            "input_usd_micros_per_1k": 1375,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 344,
+            "cache_write_input_usd_micros_per_1k": 11000,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 2188,
-            "output_usd_micros_per_1k": 17500,
-            "cache_read_input_usd_micros_per_1k": 547,
-            "cache_write_input_usd_micros_per_1k": 17500,
+        "priority": {
+            "input_usd_micros_per_1k": 2406,
+            "output_usd_micros_per_1k": 19250,
+            "cache_read_input_usd_micros_per_1k": 602,
+            "cache_write_input_usd_micros_per_1k": 19250,
         },
-    },  # $2.188/$17.5 per 1M
+    },  # $1.375/$11 per 1M
+    "us.amazon.nova-2-sonic-v1:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 330,
+            "output_usd_micros_per_1k": 2750,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $0.33/$2.75 per 1M
     "us.amazon.nova-lite-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 60,
             "output_usd_micros_per_1k": 240,
-            "cache_read_input_usd_micros_per_1k": 240,
+            "cache_read_input_usd_micros_per_1k": 15,
             "cache_write_input_usd_micros_per_1k": 240,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 60,
-            "output_usd_micros_per_1k": 240,
-            "cache_read_input_usd_micros_per_1k": 240,
-            "cache_write_input_usd_micros_per_1k": 240,
-        },
+        }
     },  # $0.06/$0.24 per 1M
     "us.amazon.nova-micro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 35,
             "output_usd_micros_per_1k": 140,
-            "cache_read_input_usd_micros_per_1k": 140,
+            "cache_read_input_usd_micros_per_1k": 9,
             "cache_write_input_usd_micros_per_1k": 140,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 35,
-            "output_usd_micros_per_1k": 140,
-            "cache_read_input_usd_micros_per_1k": 140,
-            "cache_write_input_usd_micros_per_1k": 140,
-        },
+        }
     },  # $0.035/$0.14 per 1M
     "us.amazon.nova-premier-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2500,
             "output_usd_micros_per_1k": 12500,
-            "cache_read_input_usd_micros_per_1k": 12500,
+            "cache_read_input_usd_micros_per_1k": 625,
             "cache_write_input_usd_micros_per_1k": 12500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 2500,
-            "output_usd_micros_per_1k": 12500,
-            "cache_read_input_usd_micros_per_1k": 12500,
-            "cache_write_input_usd_micros_per_1k": 12500,
+        "priority": {
+            "input_usd_micros_per_1k": 4375,
+            "output_usd_micros_per_1k": 21875,
+            "cache_read_input_usd_micros_per_1k": 1094,
+            "cache_write_input_usd_micros_per_1k": 21875,
         },
     },  # $2.5/$12.5 per 1M
     "us.amazon.nova-pro-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 3200,
-            "cache_read_input_usd_micros_per_1k": 3200,
+            "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 3200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 3200,
-            "cache_read_input_usd_micros_per_1k": 3200,
-            "cache_write_input_usd_micros_per_1k": 3200,
+        "flex": {
+            "input_usd_micros_per_1k": 400,
+            "output_usd_micros_per_1k": 1600,
+            "cache_read_input_usd_micros_per_1k": 100,
+            "cache_write_input_usd_micros_per_1k": 1600,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1400,
+            "output_usd_micros_per_1k": 5600,
+            "cache_read_input_usd_micros_per_1k": 350,
+            "cache_write_input_usd_micros_per_1k": 5600,
         },
     },  # $0.8/$3.2 per 1M
     "us.amazon.titan-embed-g1-text-02": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.1/$0 per 1M
     "us.amazon.titan-embed-image-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.8/$0 per 1M
     "us.amazon.titan-embed-text-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.1/$0 per 1M
     "us.amazon.titan-embed-text-v2:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 20,
             "output_usd_micros_per_1k": 0,
             "cache_read_input_usd_micros_per_1k": 0,
             "cache_write_input_usd_micros_per_1k": 0,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 20,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
-        },
+        }
     },  # $0.02/$0 per 1M
     "us.amazon.titan-text-express-v1": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 1300,
-            "output_usd_micros_per_1k": 1700,
-            "cache_read_input_usd_micros_per_1k": 1700,
-            "cache_write_input_usd_micros_per_1k": 1700,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1300,
-            "output_usd_micros_per_1k": 1700,
-            "cache_read_input_usd_micros_per_1k": 1700,
-            "cache_write_input_usd_micros_per_1k": 1700,
-        },
-    },  # $1.3/$1.7 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 200,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        }
+    },  # $0.2/$0.6 per 1M
     "us.amazon.titan-text-lite-v1": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
-        },
-    },  # $0.3/$0.4 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 200,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 200,
+        }
+    },  # $0.15/$0.2 per 1M
     "us.amazon.titan-text-premier-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1500,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 1500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
-        },
+        }
     },  # $0.5/$1.5 per 1M
     "us.anthropic.claude-3-5-haiku-20241022-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 4000,
             "cache_read_input_usd_micros_per_1k": 80,
             "cache_write_input_usd_micros_per_1k": 1000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 4000,
-            "cache_read_input_usd_micros_per_1k": 80,
-            "cache_write_input_usd_micros_per_1k": 1000,
-        },
+        }
     },  # $0.8/$4 per 1M
     "us.anthropic.claude-3-5-sonnet-20240620-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "us.anthropic.claude-3-5-sonnet-20241022-v2:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "us.anthropic.claude-3-7-sonnet-20240620-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3600,
             "output_usd_micros_per_1k": 18000,
             "cache_read_input_usd_micros_per_1k": 360,
             "cache_write_input_usd_micros_per_1k": 4500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3600,
-            "output_usd_micros_per_1k": 18000,
-            "cache_read_input_usd_micros_per_1k": 360,
-            "cache_write_input_usd_micros_per_1k": 4500,
-        },
+        }
     },  # $3.6/$18 per 1M
     "us.anthropic.claude-3-7-sonnet-20250219-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
-    "us.anthropic.claude-3-haiku-20240307-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 250,
-            "output_usd_micros_per_1k": 1250,
-            "cache_read_input_usd_micros_per_1k": 25,
-            "cache_write_input_usd_micros_per_1k": 312,
-        },
-    },  # $0.25/$1.25 per 1M
     "us.anthropic.claude-3-opus-20240229-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
-    "us.anthropic.claude-3-sonnet-20240229-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
-    },  # $3/$15 per 1M
     "us.anthropic.claude-fable-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 11000,
             "output_usd_micros_per_1k": 55000,
             "cache_read_input_usd_micros_per_1k": 1100,
             "cache_write_input_usd_micros_per_1k": 13750,
-        },
-        "batch": {
+        }
+    },  # $11/$55 per 1M
+    "us.anthropic.claude-fable-5-1": {
+        "standard": {
             "input_usd_micros_per_1k": 11000,
             "output_usd_micros_per_1k": 55000,
-            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_read_input_usd_micros_per_1k": 275,
             "cache_write_input_usd_micros_per_1k": 13750,
-        },
+        }
     },  # $11/$55 per 1M
     "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1100,
             "output_usd_micros_per_1k": 5500,
             "cache_read_input_usd_micros_per_1k": 110,
             "cache_write_input_usd_micros_per_1k": 1375,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1100,
-            "output_usd_micros_per_1k": 5500,
-            "cache_read_input_usd_micros_per_1k": 110,
-            "cache_write_input_usd_micros_per_1k": 1375,
-        },
+        }
     },  # $1.1/$5.5 per 1M
     "us.anthropic.claude-haiku-4-5@20251001": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 5000,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 1250,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1000,
-            "output_usd_micros_per_1k": 5000,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 1250,
-        },
+        }
     },  # $1/$5 per 1M
+    "us.anthropic.claude-haiku-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 550,
+            "cache_read_input_usd_micros_per_1k": 11,
+            "cache_write_input_usd_micros_per_1k": 138,
+        }
+    },  # $0.11/$0.55 per 1M
     "us.anthropic.claude-instant-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 800,
             "output_usd_micros_per_1k": 2400,
             "cache_read_input_usd_micros_per_1k": 2400,
             "cache_write_input_usd_micros_per_1k": 2400,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 800,
-            "output_usd_micros_per_1k": 2400,
-            "cache_read_input_usd_micros_per_1k": 2400,
-            "cache_write_input_usd_micros_per_1k": 2400,
-        },
+        }
     },  # $0.8/$2.4 per 1M
+    "us.anthropic.claude-mythos-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 11000,
+            "output_usd_micros_per_1k": 55000,
+            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_write_input_usd_micros_per_1k": 13750,
+        }
+    },  # $11/$55 per 1M
+    "us.anthropic.claude-mythos-5-1": {
+        "standard": {
+            "input_usd_micros_per_1k": 11000,
+            "output_usd_micros_per_1k": 55000,
+            "cache_read_input_usd_micros_per_1k": 275,
+            "cache_write_input_usd_micros_per_1k": 13750,
+        }
+    },  # $11/$55 per 1M
+    "us.anthropic.claude-mythos-preview": {
+        "standard": {
+            "input_usd_micros_per_1k": 27500,
+            "output_usd_micros_per_1k": 137500,
+            "cache_read_input_usd_micros_per_1k": 2750,
+            "cache_write_input_usd_micros_per_1k": 34375,
+        }
+    },  # $27.5/$137.5 per 1M
     "us.anthropic.claude-opus-4-1-20250805-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
     "us.anthropic.claude-opus-4-20250514-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 15000,
             "output_usd_micros_per_1k": 75000,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 18750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 15000,
-            "output_usd_micros_per_1k": 75000,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 18750,
-        },
+        }
     },  # $15/$75 per 1M
     "us.anthropic.claude-opus-4-5-20251101-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
     "us.anthropic.claude-opus-4-6-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
     "us.anthropic.claude-opus-4-7": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
     "us.anthropic.claude-opus-4-8": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 5500,
             "output_usd_micros_per_1k": 27500,
             "cache_read_input_usd_micros_per_1k": 550,
             "cache_write_input_usd_micros_per_1k": 6875,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5500,
-            "output_usd_micros_per_1k": 27500,
-            "cache_read_input_usd_micros_per_1k": 550,
-            "cache_write_input_usd_micros_per_1k": 6875,
-        },
+        }
     },  # $5.5/$27.5 per 1M
+    "us.anthropic.claude-opus-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 27500,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6875,
+        }
+    },  # $5.5/$27.5 per 1M
+    "us.anthropic.claude-opus-5-5": {
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
     "us.anthropic.claude-sonnet-4-20250514-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3000,
             "output_usd_micros_per_1k": 15000,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 3750,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 15000,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 3750,
-        },
+        }
     },  # $3/$15 per 1M
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3300,
             "output_usd_micros_per_1k": 16500,
             "cache_read_input_usd_micros_per_1k": 330,
             "cache_write_input_usd_micros_per_1k": 4125,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3300,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 330,
-            "cache_write_input_usd_micros_per_1k": 4125,
-        },
+        }
     },  # $3.3/$16.5 per 1M
     "us.anthropic.claude-sonnet-4-6": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 3300,
             "output_usd_micros_per_1k": 16500,
             "cache_read_input_usd_micros_per_1k": 330,
             "cache_write_input_usd_micros_per_1k": 4125,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3300,
-            "output_usd_micros_per_1k": 16500,
-            "cache_read_input_usd_micros_per_1k": 330,
-            "cache_write_input_usd_micros_per_1k": 4125,
-        },
+        }
     },  # $3.3/$16.5 per 1M
     "us.anthropic.claude-sonnet-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2200,
             "output_usd_micros_per_1k": 11000,
             "cache_read_input_usd_micros_per_1k": 220,
             "cache_write_input_usd_micros_per_1k": 2750,
-        },
-        "batch": {
+        }
+    },  # $2.2/$11 per 1M
+    "us.anthropic.claude-sonnet-5-5": {
+        "standard": {
             "input_usd_micros_per_1k": 2200,
             "output_usd_micros_per_1k": 11000,
-            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_read_input_usd_micros_per_1k": 110,
             "cache_write_input_usd_micros_per_1k": 2750,
-        },
+        }
     },  # $2.2/$11 per 1M
     "us.anthropic.claude-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 8000,
             "output_usd_micros_per_1k": 24000,
             "cache_read_input_usd_micros_per_1k": 24000,
             "cache_write_input_usd_micros_per_1k": 24000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
+        }
     },  # $8/$24 per 1M
     "us.anthropic.claude-v2:1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 8000,
             "output_usd_micros_per_1k": 24000,
             "cache_read_input_usd_micros_per_1k": 24000,
             "cache_write_input_usd_micros_per_1k": 24000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
+        }
     },  # $8/$24 per 1M
+    "us.cohere.embed-v4:0": {
+        "standard": {
+            "input_usd_micros_per_1k": 120,
+            "output_usd_micros_per_1k": 0,
+            "cache_read_input_usd_micros_per_1k": 0,
+            "cache_write_input_usd_micros_per_1k": 0,
+        }
+    },  # $0.12/$0 per 1M
     "us.deepseek.r1-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1350,
             "output_usd_micros_per_1k": 5400,
             "cache_read_input_usd_micros_per_1k": 5400,
             "cache_write_input_usd_micros_per_1k": 5400,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1350,
-            "output_usd_micros_per_1k": 5400,
-            "cache_read_input_usd_micros_per_1k": 5400,
-            "cache_write_input_usd_micros_per_1k": 5400,
-        },
+        }
     },  # $1.35/$5.4 per 1M
     "us.deepseek.v3-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 580,
             "output_usd_micros_per_1k": 1680,
             "cache_read_input_usd_micros_per_1k": 1680,
             "cache_write_input_usd_micros_per_1k": 1680,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 580,
-            "output_usd_micros_per_1k": 1680,
-            "cache_read_input_usd_micros_per_1k": 1680,
-            "cache_write_input_usd_micros_per_1k": 1680,
-        },
+        }
     },  # $0.58/$1.68 per 1M
     "us.deepseek.v3.2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 620,
             "output_usd_micros_per_1k": 1850,
             "cache_read_input_usd_micros_per_1k": 1850,
             "cache_write_input_usd_micros_per_1k": 1850,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 620,
-            "output_usd_micros_per_1k": 1850,
-            "cache_read_input_usd_micros_per_1k": 1850,
-            "cache_write_input_usd_micros_per_1k": 1850,
+        "flex": {
+            "input_usd_micros_per_1k": 310,
+            "output_usd_micros_per_1k": 925,
+            "cache_read_input_usd_micros_per_1k": 925,
+            "cache_write_input_usd_micros_per_1k": 925,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1085,
+            "output_usd_micros_per_1k": 3238,
+            "cache_read_input_usd_micros_per_1k": 3238,
+            "cache_write_input_usd_micros_per_1k": 3238,
         },
     },  # $0.62/$1.85 per 1M
     "us.meta.llama2-13b-chat-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 750,
             "output_usd_micros_per_1k": 1000,
             "cache_read_input_usd_micros_per_1k": 1000,
             "cache_write_input_usd_micros_per_1k": 1000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 750,
-            "output_usd_micros_per_1k": 1000,
-            "cache_read_input_usd_micros_per_1k": 1000,
-            "cache_write_input_usd_micros_per_1k": 1000,
-        },
+        }
     },  # $0.75/$1 per 1M
     "us.meta.llama2-70b-chat-v1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1950,
             "output_usd_micros_per_1k": 2560,
             "cache_read_input_usd_micros_per_1k": 2560,
             "cache_write_input_usd_micros_per_1k": 2560,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1950,
-            "output_usd_micros_per_1k": 2560,
-            "cache_read_input_usd_micros_per_1k": 2560,
-            "cache_write_input_usd_micros_per_1k": 2560,
-        },
+        }
     },  # $1.95/$2.56 per 1M
     "us.meta.llama3-1-405b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 5320,
-            "output_usd_micros_per_1k": 16000,
-            "cache_read_input_usd_micros_per_1k": 16000,
-            "cache_write_input_usd_micros_per_1k": 16000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 5320,
-            "output_usd_micros_per_1k": 16000,
-            "cache_read_input_usd_micros_per_1k": 16000,
-            "cache_write_input_usd_micros_per_1k": 16000,
-        },
-    },  # $5.32/$16 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 2400,
+            "output_usd_micros_per_1k": 2400,
+            "cache_read_input_usd_micros_per_1k": 2400,
+            "cache_write_input_usd_micros_per_1k": 2400,
+        }
+    },  # $2.4/$2.4 per 1M
     "us.meta.llama3-1-70b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 990,
-            "output_usd_micros_per_1k": 990,
-            "cache_read_input_usd_micros_per_1k": 990,
-            "cache_write_input_usd_micros_per_1k": 990,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 990,
-            "output_usd_micros_per_1k": 990,
-            "cache_read_input_usd_micros_per_1k": 990,
-            "cache_write_input_usd_micros_per_1k": 990,
-        },
-    },  # $0.99/$0.99 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 720,
+            "output_usd_micros_per_1k": 720,
+            "cache_read_input_usd_micros_per_1k": 720,
+            "cache_write_input_usd_micros_per_1k": 720,
+        }
+    },  # $0.72/$0.72 per 1M
     "us.meta.llama3-1-8b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 220,
             "output_usd_micros_per_1k": 220,
             "cache_read_input_usd_micros_per_1k": 220,
             "cache_write_input_usd_micros_per_1k": 220,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 220,
-            "output_usd_micros_per_1k": 220,
-            "cache_read_input_usd_micros_per_1k": 220,
-            "cache_write_input_usd_micros_per_1k": 220,
-        },
+        }
     },  # $0.22/$0.22 per 1M
     "us.meta.llama3-2-11b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 350,
-            "output_usd_micros_per_1k": 350,
-            "cache_read_input_usd_micros_per_1k": 350,
-            "cache_write_input_usd_micros_per_1k": 350,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 350,
-            "output_usd_micros_per_1k": 350,
-            "cache_read_input_usd_micros_per_1k": 350,
-            "cache_write_input_usd_micros_per_1k": 350,
-        },
-    },  # $0.35/$0.35 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 160,
+            "output_usd_micros_per_1k": 160,
+            "cache_read_input_usd_micros_per_1k": 160,
+            "cache_write_input_usd_micros_per_1k": 160,
+        }
+    },  # $0.16/$0.16 per 1M
     "us.meta.llama3-2-1b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 100,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 100,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 100,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 100,
-        },
+        }
     },  # $0.1/$0.1 per 1M
     "us.meta.llama3-2-3b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 150,
             "cache_read_input_usd_micros_per_1k": 150,
             "cache_write_input_usd_micros_per_1k": 150,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 150,
-            "cache_read_input_usd_micros_per_1k": 150,
-            "cache_write_input_usd_micros_per_1k": 150,
-        },
+        }
     },  # $0.15/$0.15 per 1M
     "us.meta.llama3-2-90b-instruct-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
-        },
-    },  # $2/$2 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 720,
+            "output_usd_micros_per_1k": 720,
+            "cache_read_input_usd_micros_per_1k": 720,
+            "cache_write_input_usd_micros_per_1k": 720,
+        }
+    },  # $0.72/$0.72 per 1M
     "us.meta.llama3-3-70b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 720,
             "output_usd_micros_per_1k": 720,
             "cache_read_input_usd_micros_per_1k": 720,
             "cache_write_input_usd_micros_per_1k": 720,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 720,
-            "output_usd_micros_per_1k": 720,
-            "cache_read_input_usd_micros_per_1k": 720,
-            "cache_write_input_usd_micros_per_1k": 720,
-        },
+        }
     },  # $0.72/$0.72 per 1M
     "us.meta.llama3-70b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2650,
             "output_usd_micros_per_1k": 3500,
             "cache_read_input_usd_micros_per_1k": 3500,
             "cache_write_input_usd_micros_per_1k": 3500,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2650,
-            "output_usd_micros_per_1k": 3500,
-            "cache_read_input_usd_micros_per_1k": 3500,
-            "cache_write_input_usd_micros_per_1k": 3500,
-        },
+        }
     },  # $2.65/$3.5 per 1M
     "us.meta.llama3-8b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 300,
             "output_usd_micros_per_1k": 600,
             "cache_read_input_usd_micros_per_1k": 600,
             "cache_write_input_usd_micros_per_1k": 600,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 300,
-            "output_usd_micros_per_1k": 600,
-            "cache_read_input_usd_micros_per_1k": 600,
-            "cache_write_input_usd_micros_per_1k": 600,
-        },
+        }
     },  # $0.3/$0.6 per 1M
     "us.meta.llama4-maverick-17b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 240,
             "output_usd_micros_per_1k": 970,
             "cache_read_input_usd_micros_per_1k": 970,
             "cache_write_input_usd_micros_per_1k": 970,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 240,
-            "output_usd_micros_per_1k": 970,
-            "cache_read_input_usd_micros_per_1k": 970,
-            "cache_write_input_usd_micros_per_1k": 970,
-        },
+        }
     },  # $0.24/$0.97 per 1M
     "us.meta.llama4-scout-17b-instruct-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 170,
             "output_usd_micros_per_1k": 660,
             "cache_read_input_usd_micros_per_1k": 660,
             "cache_write_input_usd_micros_per_1k": 660,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 170,
-            "output_usd_micros_per_1k": 660,
-            "cache_read_input_usd_micros_per_1k": 660,
-            "cache_write_input_usd_micros_per_1k": 660,
-        },
+        }
     },  # $0.17/$0.66 per 1M
     "us.mistral.devstral-2-123b": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 400,
             "output_usd_micros_per_1k": 2000,
             "cache_read_input_usd_micros_per_1k": 2000,
             "cache_write_input_usd_micros_per_1k": 2000,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 400,
-            "output_usd_micros_per_1k": 2000,
-            "cache_read_input_usd_micros_per_1k": 2000,
-            "cache_write_input_usd_micros_per_1k": 2000,
+        "flex": {
+            "input_usd_micros_per_1k": 200,
+            "output_usd_micros_per_1k": 1000,
+            "cache_read_input_usd_micros_per_1k": 1000,
+            "cache_write_input_usd_micros_per_1k": 1000,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 700,
+            "output_usd_micros_per_1k": 3500,
+            "cache_read_input_usd_micros_per_1k": 3500,
+            "cache_write_input_usd_micros_per_1k": 3500,
         },
     },  # $0.4/$2 per 1M
     "us.mistral.magistral-small-2509": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1500,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 1500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
+        "flex": {
+            "input_usd_micros_per_1k": 250,
+            "output_usd_micros_per_1k": 750,
+            "cache_read_input_usd_micros_per_1k": 750,
+            "cache_write_input_usd_micros_per_1k": 750,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 880,
+            "output_usd_micros_per_1k": 2630,
+            "cache_read_input_usd_micros_per_1k": 2640,
+            "cache_write_input_usd_micros_per_1k": 2640,
         },
     },  # $0.5/$1.5 per 1M
     "us.mistral.ministral-3-14b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 200,
             "output_usd_micros_per_1k": 200,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 200,
-            "output_usd_micros_per_1k": 200,
-            "cache_read_input_usd_micros_per_1k": 200,
-            "cache_write_input_usd_micros_per_1k": 200,
+        "flex": {
+            "input_usd_micros_per_1k": 100,
+            "output_usd_micros_per_1k": 100,
+            "cache_read_input_usd_micros_per_1k": 100,
+            "cache_write_input_usd_micros_per_1k": 100,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 350,
+            "output_usd_micros_per_1k": 350,
+            "cache_read_input_usd_micros_per_1k": 350,
+            "cache_write_input_usd_micros_per_1k": 350,
         },
     },  # $0.2/$0.2 per 1M
     "us.mistral.ministral-3-3b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 100,
             "cache_read_input_usd_micros_per_1k": 100,
             "cache_write_input_usd_micros_per_1k": 100,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 100,
-            "cache_read_input_usd_micros_per_1k": 100,
-            "cache_write_input_usd_micros_per_1k": 100,
+        "flex": {
+            "input_usd_micros_per_1k": 50,
+            "output_usd_micros_per_1k": 50,
+            "cache_read_input_usd_micros_per_1k": 50,
+            "cache_write_input_usd_micros_per_1k": 50,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 170,
+            "output_usd_micros_per_1k": 170,
+            "cache_read_input_usd_micros_per_1k": 170,
+            "cache_write_input_usd_micros_per_1k": 170,
         },
     },  # $0.1/$0.1 per 1M
     "us.mistral.ministral-3-8b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 150,
             "cache_read_input_usd_micros_per_1k": 150,
             "cache_write_input_usd_micros_per_1k": 150,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 150,
-            "cache_read_input_usd_micros_per_1k": 150,
-            "cache_write_input_usd_micros_per_1k": 150,
+        "flex": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 70,
+            "cache_read_input_usd_micros_per_1k": 70,
+            "cache_write_input_usd_micros_per_1k": 70,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 260,
+            "output_usd_micros_per_1k": 260,
+            "cache_read_input_usd_micros_per_1k": 260,
+            "cache_write_input_usd_micros_per_1k": 260,
         },
     },  # $0.15/$0.15 per 1M
     "us.mistral.mistral-7b-instruct-v0:2": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 150,
             "output_usd_micros_per_1k": 200,
             "cache_read_input_usd_micros_per_1k": 200,
             "cache_write_input_usd_micros_per_1k": 200,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 150,
-            "output_usd_micros_per_1k": 200,
-            "cache_read_input_usd_micros_per_1k": 200,
-            "cache_write_input_usd_micros_per_1k": 200,
-        },
+        }
     },  # $0.15/$0.2 per 1M
     "us.mistral.mistral-large-2402-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 8000,
-            "output_usd_micros_per_1k": 24000,
-            "cache_read_input_usd_micros_per_1k": 24000,
-            "cache_write_input_usd_micros_per_1k": 24000,
-        },
-    },  # $8/$24 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 4000,
+            "output_usd_micros_per_1k": 12000,
+            "cache_read_input_usd_micros_per_1k": 12000,
+            "cache_write_input_usd_micros_per_1k": 12000,
+        }
+    },  # $4/$12 per 1M
     "us.mistral.mistral-large-2407-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 9000,
-            "cache_read_input_usd_micros_per_1k": 9000,
-            "cache_write_input_usd_micros_per_1k": 9000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 3000,
-            "output_usd_micros_per_1k": 9000,
-            "cache_read_input_usd_micros_per_1k": 9000,
-            "cache_write_input_usd_micros_per_1k": 9000,
-        },
-    },  # $3/$9 per 1M
+        "standard": {
+            "input_usd_micros_per_1k": 2000,
+            "output_usd_micros_per_1k": 6000,
+            "cache_read_input_usd_micros_per_1k": 6000,
+            "cache_write_input_usd_micros_per_1k": 6000,
+        }
+    },  # $2/$6 per 1M
     "us.mistral.mistral-large-3-675b-instruct": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 500,
             "output_usd_micros_per_1k": 1500,
             "cache_read_input_usd_micros_per_1k": 1500,
             "cache_write_input_usd_micros_per_1k": 1500,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 500,
-            "output_usd_micros_per_1k": 1500,
-            "cache_read_input_usd_micros_per_1k": 1500,
-            "cache_write_input_usd_micros_per_1k": 1500,
+        "flex": {
+            "input_usd_micros_per_1k": 250,
+            "output_usd_micros_per_1k": 750,
+            "cache_read_input_usd_micros_per_1k": 750,
+            "cache_write_input_usd_micros_per_1k": 750,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 880,
+            "output_usd_micros_per_1k": 2630,
+            "cache_read_input_usd_micros_per_1k": 2640,
+            "cache_write_input_usd_micros_per_1k": 2640,
         },
     },  # $0.5/$1.5 per 1M
     "us.mistral.mistral-small-2402-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 3000,
             "cache_read_input_usd_micros_per_1k": 3000,
             "cache_write_input_usd_micros_per_1k": 3000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 1000,
-            "output_usd_micros_per_1k": 3000,
-            "cache_read_input_usd_micros_per_1k": 3000,
-            "cache_write_input_usd_micros_per_1k": 3000,
-        },
+        }
     },  # $1/$3 per 1M
     "us.mistral.mixtral-8x7b-instruct-v0:1": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 450,
             "output_usd_micros_per_1k": 700,
             "cache_read_input_usd_micros_per_1k": 700,
             "cache_write_input_usd_micros_per_1k": 700,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 450,
-            "output_usd_micros_per_1k": 700,
-            "cache_read_input_usd_micros_per_1k": 700,
-            "cache_write_input_usd_micros_per_1k": 700,
-        },
+        }
     },  # $0.45/$0.7 per 1M
     "us.mistral.pixtral-large-2502-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2000,
             "output_usd_micros_per_1k": 6000,
             "cache_read_input_usd_micros_per_1k": 6000,
             "cache_write_input_usd_micros_per_1k": 6000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2000,
-            "output_usd_micros_per_1k": 6000,
-            "cache_read_input_usd_micros_per_1k": 6000,
-            "cache_write_input_usd_micros_per_1k": 6000,
-        },
+        }
     },  # $2/$6 per 1M
     "us.mistral.voxtral-mini-3b-2507": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 40,
             "output_usd_micros_per_1k": 40,
             "cache_read_input_usd_micros_per_1k": 40,
             "cache_write_input_usd_micros_per_1k": 40,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 40,
-            "output_usd_micros_per_1k": 40,
-            "cache_read_input_usd_micros_per_1k": 40,
-            "cache_write_input_usd_micros_per_1k": 40,
+        "flex": {
+            "input_usd_micros_per_1k": 20,
+            "output_usd_micros_per_1k": 20,
+            "cache_read_input_usd_micros_per_1k": 20,
+            "cache_write_input_usd_micros_per_1k": 20,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 70,
+            "output_usd_micros_per_1k": 70,
+            "cache_read_input_usd_micros_per_1k": 70,
+            "cache_write_input_usd_micros_per_1k": 70,
         },
     },  # $0.04/$0.04 per 1M
     "us.mistral.voxtral-small-24b-2507": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 100,
             "output_usd_micros_per_1k": 300,
             "cache_read_input_usd_micros_per_1k": 300,
             "cache_write_input_usd_micros_per_1k": 300,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 100,
-            "output_usd_micros_per_1k": 300,
-            "cache_read_input_usd_micros_per_1k": 300,
-            "cache_write_input_usd_micros_per_1k": 300,
+        "flex": {
+            "input_usd_micros_per_1k": 50,
+            "output_usd_micros_per_1k": 150,
+            "cache_read_input_usd_micros_per_1k": 150,
+            "cache_write_input_usd_micros_per_1k": 150,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 170,
+            "output_usd_micros_per_1k": 520,
+            "cache_read_input_usd_micros_per_1k": 510,
+            "cache_write_input_usd_micros_per_1k": 510,
         },
     },  # $0.1/$0.3 per 1M
-    "us.twelvelabs.marengo-embed-2-7-v1:0": {
-        "on_demand": {
-            "input_usd_micros_per_1k": 70000,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
+    "us.moonshotai.kimi-k3": {
+        "standard": {
+            "input_usd_micros_per_1k": 3300,
+            "output_usd_micros_per_1k": 16500,
+            "cache_read_input_usd_micros_per_1k": 330,
+            "cache_write_input_usd_micros_per_1k": 4125,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 70000,
-            "output_usd_micros_per_1k": 0,
-            "cache_read_input_usd_micros_per_1k": 0,
-            "cache_write_input_usd_micros_per_1k": 0,
+        "flex": {
+            "input_usd_micros_per_1k": 1650,
+            "output_usd_micros_per_1k": 8250,
+            "cache_read_input_usd_micros_per_1k": 165,
+            "cache_write_input_usd_micros_per_1k": 2062,
         },
-    },  # $70/$0 per 1M
+        "priority": {
+            "input_usd_micros_per_1k": 5775,
+            "output_usd_micros_per_1k": 28875,
+            "cache_read_input_usd_micros_per_1k": 578,
+            "cache_write_input_usd_micros_per_1k": 7219,
+        },
+    },  # $3.3/$16.5 per 1M
+    "us.openai.gpt-5.4": {
+        "standard": {
+            "input_usd_micros_per_1k": 2750,
+            "output_usd_micros_per_1k": 16500,
+            "cache_read_input_usd_micros_per_1k": 275,
+            "cache_write_input_usd_micros_per_1k": 16500,
+        }
+    },  # $2.75/$16.5 per 1M
+    "us.openai.gpt-5.5": {
+        "standard": {
+            "input_usd_micros_per_1k": 5500,
+            "output_usd_micros_per_1k": 33000,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 33000,
+        }
+    },  # $5.5/$33 per 1M
+    "us.openai.gpt-5.6-luna": {
+        "standard": {
+            "input_usd_micros_per_1k": 220,
+            "output_usd_micros_per_1k": 1320,
+            "cache_read_input_usd_micros_per_1k": 22,
+            "cache_write_input_usd_micros_per_1k": 275,
+        }
+    },  # $0.22/$1.32 per 1M
+    "us.openai.gpt-5.6-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 4400,
+            "output_usd_micros_per_1k": 22000,
+            "cache_read_input_usd_micros_per_1k": 440,
+            "cache_write_input_usd_micros_per_1k": 5500,
+        }
+    },  # $4.4/$22 per 1M
+    "us.openai.gpt-5.6-terra": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 13200,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$13.2 per 1M
+    "us.openai.gpt-6-astra": {
+        "standard": {
+            "input_usd_micros_per_1k": 11000,
+            "output_usd_micros_per_1k": 55000,
+            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_write_input_usd_micros_per_1k": 13750,
+        }
+    },  # $11/$55 per 1M
+    "us.openai.gpt-6-luna": {
+        "standard": {
+            "input_usd_micros_per_1k": 110,
+            "output_usd_micros_per_1k": 550,
+            "cache_read_input_usd_micros_per_1k": 11,
+            "cache_write_input_usd_micros_per_1k": 138,
+        }
+    },  # $0.11/$0.55 per 1M
+    "us.openai.gpt-6-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 220,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$11 per 1M
+    "us.openai.gpt-6.1-sol": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 11000,
+            "cache_read_input_usd_micros_per_1k": 110,
+            "cache_write_input_usd_micros_per_1k": 2750,
+        }
+    },  # $2.2/$11 per 1M
+    "us.openai.gpt-6.1-terra": {
+        "standard": {
+            "input_usd_micros_per_1k": 1100,
+            "output_usd_micros_per_1k": 5500,
+            "cache_read_input_usd_micros_per_1k": 55,
+            "cache_write_input_usd_micros_per_1k": 1375,
+        }
+    },  # $1.1/$5.5 per 1M
+    "us.writer.palmyra-vision-7b": {
+        "standard": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 75,
+            "output_usd_micros_per_1k": 300,
+            "cache_read_input_usd_micros_per_1k": 300,
+            "cache_write_input_usd_micros_per_1k": 300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
+        },
+    },  # $0.15/$0.6 per 1M
     "us.writer.palmyra-x4-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2500,
             "output_usd_micros_per_1k": 10000,
             "cache_read_input_usd_micros_per_1k": 10000,
             "cache_write_input_usd_micros_per_1k": 10000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2500,
-            "output_usd_micros_per_1k": 10000,
-            "cache_read_input_usd_micros_per_1k": 10000,
-            "cache_write_input_usd_micros_per_1k": 10000,
-        },
+        }
     },  # $2.5/$10 per 1M
     "us.writer.palmyra-x5-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 600,
             "output_usd_micros_per_1k": 6000,
             "cache_read_input_usd_micros_per_1k": 6000,
             "cache_write_input_usd_micros_per_1k": 6000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 600,
-            "output_usd_micros_per_1k": 6000,
-            "cache_read_input_usd_micros_per_1k": 6000,
-            "cache_write_input_usd_micros_per_1k": 6000,
-        },
+        }
     },  # $0.6/$6 per 1M
+    "us.xai.grok-4.6": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 6600,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6600,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1100,
+            "output_usd_micros_per_1k": 3300,
+            "cache_read_input_usd_micros_per_1k": 275,
+            "cache_write_input_usd_micros_per_1k": 3300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 3850,
+            "output_usd_micros_per_1k": 11550,
+            "cache_read_input_usd_micros_per_1k": 963,
+            "cache_write_input_usd_micros_per_1k": 11550,
+        },
+    },  # $2.2/$6.6 per 1M
+    "us.xai.grok-4.7": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 6600,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6600,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1100,
+            "output_usd_micros_per_1k": 3300,
+            "cache_read_input_usd_micros_per_1k": 275,
+            "cache_write_input_usd_micros_per_1k": 3300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 3850,
+            "output_usd_micros_per_1k": 11550,
+            "cache_read_input_usd_micros_per_1k": 963,
+            "cache_write_input_usd_micros_per_1k": 11550,
+        },
+    },  # $2.2/$6.6 per 1M
+    "us.zai.glm-5.3": {
+        "standard": {
+            "input_usd_micros_per_1k": 1848,
+            "output_usd_micros_per_1k": 5808,
+            "cache_read_input_usd_micros_per_1k": 343,
+            "cache_write_input_usd_micros_per_1k": 2310,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 924,
+            "output_usd_micros_per_1k": 2904,
+            "cache_read_input_usd_micros_per_1k": 172,
+            "cache_write_input_usd_micros_per_1k": 1155,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 3234,
+            "output_usd_micros_per_1k": 10164,
+            "cache_read_input_usd_micros_per_1k": 601,
+            "cache_write_input_usd_micros_per_1k": 4042,
+        },
+    },  # $1.848/$5.808 per 1M
+    "writer.palmyra-vision-7b": {
+        "standard": {
+            "input_usd_micros_per_1k": 150,
+            "output_usd_micros_per_1k": 600,
+            "cache_read_input_usd_micros_per_1k": 600,
+            "cache_write_input_usd_micros_per_1k": 600,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 75,
+            "output_usd_micros_per_1k": 300,
+            "cache_read_input_usd_micros_per_1k": 300,
+            "cache_write_input_usd_micros_per_1k": 300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 262,
+            "output_usd_micros_per_1k": 1050,
+            "cache_read_input_usd_micros_per_1k": 1050,
+            "cache_write_input_usd_micros_per_1k": 1050,
+        },
+    },  # $0.15/$0.6 per 1M
     "writer.palmyra-x4-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 2500,
             "output_usd_micros_per_1k": 10000,
             "cache_read_input_usd_micros_per_1k": 10000,
             "cache_write_input_usd_micros_per_1k": 10000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 2500,
-            "output_usd_micros_per_1k": 10000,
-            "cache_read_input_usd_micros_per_1k": 10000,
-            "cache_write_input_usd_micros_per_1k": 10000,
-        },
+        }
     },  # $2.5/$10 per 1M
     "writer.palmyra-x5-v1:0": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 600,
             "output_usd_micros_per_1k": 6000,
             "cache_read_input_usd_micros_per_1k": 6000,
             "cache_write_input_usd_micros_per_1k": 6000,
-        },
-        "batch": {
-            "input_usd_micros_per_1k": 600,
-            "output_usd_micros_per_1k": 6000,
-            "cache_read_input_usd_micros_per_1k": 6000,
-            "cache_write_input_usd_micros_per_1k": 6000,
-        },
+        }
     },  # $0.6/$6 per 1M
+    "xai.grok-4.6": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 6600,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6600,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1100,
+            "output_usd_micros_per_1k": 3300,
+            "cache_read_input_usd_micros_per_1k": 275,
+            "cache_write_input_usd_micros_per_1k": 3300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 3850,
+            "output_usd_micros_per_1k": 11550,
+            "cache_read_input_usd_micros_per_1k": 963,
+            "cache_write_input_usd_micros_per_1k": 11550,
+        },
+    },  # $2.2/$6.6 per 1M
+    "xai.grok-4.7": {
+        "standard": {
+            "input_usd_micros_per_1k": 2200,
+            "output_usd_micros_per_1k": 6600,
+            "cache_read_input_usd_micros_per_1k": 550,
+            "cache_write_input_usd_micros_per_1k": 6600,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 1100,
+            "output_usd_micros_per_1k": 3300,
+            "cache_read_input_usd_micros_per_1k": 275,
+            "cache_write_input_usd_micros_per_1k": 3300,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 3850,
+            "output_usd_micros_per_1k": 11550,
+            "cache_read_input_usd_micros_per_1k": 963,
+            "cache_write_input_usd_micros_per_1k": 11550,
+        },
+    },  # $2.2/$6.6 per 1M
     "zai.glm-4.7": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 600,
             "output_usd_micros_per_1k": 2200,
             "cache_read_input_usd_micros_per_1k": 2200,
             "cache_write_input_usd_micros_per_1k": 2200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 600,
-            "output_usd_micros_per_1k": 2200,
-            "cache_read_input_usd_micros_per_1k": 2200,
-            "cache_write_input_usd_micros_per_1k": 2200,
+        "flex": {
+            "input_usd_micros_per_1k": 300,
+            "output_usd_micros_per_1k": 1100,
+            "cache_read_input_usd_micros_per_1k": 1100,
+            "cache_write_input_usd_micros_per_1k": 1100,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 1050,
+            "output_usd_micros_per_1k": 3850,
+            "cache_read_input_usd_micros_per_1k": 3850,
+            "cache_write_input_usd_micros_per_1k": 3850,
         },
     },  # $0.6/$2.2 per 1M
     "zai.glm-4.7-flash": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 70,
             "output_usd_micros_per_1k": 400,
             "cache_read_input_usd_micros_per_1k": 400,
             "cache_write_input_usd_micros_per_1k": 400,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 70,
-            "output_usd_micros_per_1k": 400,
-            "cache_read_input_usd_micros_per_1k": 400,
-            "cache_write_input_usd_micros_per_1k": 400,
+        "flex": {
+            "input_usd_micros_per_1k": 35,
+            "output_usd_micros_per_1k": 200,
+            "cache_read_input_usd_micros_per_1k": 200,
+            "cache_write_input_usd_micros_per_1k": 200,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 122,
+            "output_usd_micros_per_1k": 700,
+            "cache_read_input_usd_micros_per_1k": 700,
+            "cache_write_input_usd_micros_per_1k": 700,
         },
     },  # $0.07/$0.4 per 1M
     "zai.glm-5": {
-        "on_demand": {
+        "standard": {
             "input_usd_micros_per_1k": 1000,
             "output_usd_micros_per_1k": 3200,
             "cache_read_input_usd_micros_per_1k": 3200,
             "cache_write_input_usd_micros_per_1k": 3200,
         },
-        "batch": {
-            "input_usd_micros_per_1k": 1000,
-            "output_usd_micros_per_1k": 3200,
-            "cache_read_input_usd_micros_per_1k": 3200,
-            "cache_write_input_usd_micros_per_1k": 3200,
+        "priority": {
+            "input_usd_micros_per_1k": 1750,
+            "output_usd_micros_per_1k": 5600,
+            "cache_read_input_usd_micros_per_1k": 5600,
+            "cache_write_input_usd_micros_per_1k": 5600,
         },
     },  # $1/$3.2 per 1M
+    "zai.glm-5.3": {
+        "standard": {
+            "input_usd_micros_per_1k": 1848,
+            "output_usd_micros_per_1k": 5808,
+            "cache_read_input_usd_micros_per_1k": 343,
+            "cache_write_input_usd_micros_per_1k": 2310,
+        },
+        "flex": {
+            "input_usd_micros_per_1k": 924,
+            "output_usd_micros_per_1k": 2904,
+            "cache_read_input_usd_micros_per_1k": 172,
+            "cache_write_input_usd_micros_per_1k": 1155,
+        },
+        "priority": {
+            "input_usd_micros_per_1k": 3234,
+            "output_usd_micros_per_1k": 10164,
+            "cache_read_input_usd_micros_per_1k": 601,
+            "cache_write_input_usd_micros_per_1k": 4042,
+        },
+    },  # $1.848/$5.808 per 1M
 }
 
-# Fallback for unknown models — Opus 4 rates (most expensive known tier).
-# Using a high fallback means unknown models are over-counted rather than
-# under-counted, which protects budget limits.
 logger = logging.getLogger(__name__)
 
 PricingRates = dict[str, int]
-PricingModeMap = dict[str, PricingRates]
-PricingMap = dict[str, PricingModeMap]
+PricingTierMap = dict[str, PricingRates]
+PricingMap = dict[str, PricingTierMap]
 
-_FALLBACK_BY_MODE: dict[str, PricingRates] = {
-    "on_demand": {
-        "input_usd_micros_per_1k": 15_000,
-        "output_usd_micros_per_1k": 75_000,
-        "cache_read_input_usd_micros_per_1k": 75_000,
-        "cache_write_input_usd_micros_per_1k": 75_000,
-    },
-    "batch": {
-        "input_usd_micros_per_1k": 15_000,
-        "output_usd_micros_per_1k": 75_000,
-        "cache_read_input_usd_micros_per_1k": 75_000,
-        "cache_write_input_usd_micros_per_1k": 75_000,
-    },
+# Fallback for unknown models — Opus 4 rates (most expensive known model).
+# Using a high fallback means unknown models are over-counted rather than
+# under-counted, which protects budget limits.
+_FALLBACK_RATES: PricingRates = {
+    "input_usd_micros_per_1k": 15_000,
+    "output_usd_micros_per_1k": 75_000,
+    "cache_read_input_usd_micros_per_1k": 75_000,
+    "cache_write_input_usd_micros_per_1k": 75_000,
 }
-
-_RATE_KEYS = (
-    "input_usd_micros_per_1k",
-    "output_usd_micros_per_1k",
-    "cache_read_input_usd_micros_per_1k",
-    "cache_write_input_usd_micros_per_1k",
-)
-logger = logging.getLogger(__name__)
 
 # Live-catalog cache. A successful read or an authoritative absence is cached for
 # _PRICING_TTL; a transient/corrupt S3 condition falls back to DEFAULT_PRICING but is
@@ -4528,17 +4704,12 @@ _PRICING_TTL: float = float(os.environ.get("PRICING_CACHE_TTL_S", "60"))
 _PRICING_RETRY_TTL: float = 5.0
 
 
-def _normalize_rates(rates: dict[str, int]) -> PricingRates:
-    input_rate = int(
-        rates.get(
-            "input_usd_micros_per_1k", _FALLBACK_BY_MODE["on_demand"]["input_usd_micros_per_1k"]
-        )
-    )
-    output_rate = int(
-        rates.get(
-            "output_usd_micros_per_1k", _FALLBACK_BY_MODE["on_demand"]["output_usd_micros_per_1k"]
-        )
-    )
+def _normalize_rates(rates: dict) -> PricingRates | None:
+    """Return int rates with cache rates defaulted to output, or None if input/output is missing."""
+    if "input_usd_micros_per_1k" not in rates or "output_usd_micros_per_1k" not in rates:
+        return None
+    input_rate = int(rates["input_usd_micros_per_1k"])
+    output_rate = int(rates["output_usd_micros_per_1k"])
     return {
         "input_usd_micros_per_1k": input_rate,
         "output_usd_micros_per_1k": output_rate,
@@ -4552,23 +4723,24 @@ def _normalize_rates(rates: dict[str, int]) -> PricingRates:
 
 
 def _normalize_pricing_map(raw_map: dict) -> PricingMap:
+    """Keep each service tier that normalizes; drop a model whose Standard tier does not."""
     normalized: PricingMap = {}
     for model_id, value in raw_map.items():
         if not isinstance(value, dict):
-            continue
-        if "on_demand" in value or "batch" in value:
-            mode_map: PricingModeMap = {}
-            if "on_demand" in value:
-                mode_map["on_demand"] = _normalize_rates(value.get("on_demand", {}))
-            if "batch" in value:
-                mode_map["batch"] = _normalize_rates(value.get("batch", {}))
-            normalized[model_id] = mode_map
-            continue
-        # Flat-format entry (bare rates, no on_demand/batch keys): tolerate it by
-        # mirroring on_demand into batch — consistent with the fallback policy
-        # (batch == on_demand) rather than inventing an arbitrary discount.
-        rates = _normalize_rates(value)
-        normalized[model_id] = {"on_demand": rates, "batch": rates}
+            value = {}  # dropped below, with a log line, as a model with no Standard tier
+        tiers: PricingTierMap = {}
+        for tier in SERVICE_TIERS:
+            rates = _normalize_rates(value[tier]) if tier in value else None
+            if rates is not None:
+                tiers[tier] = rates
+            elif tier in value or tier == "standard":  # an absent Flex/Priority is normal
+                logger.warning(
+                    json.dumps(
+                        {"event": "pricing_entry_invalid", "model_id": model_id, "tier": tier}
+                    )
+                )
+        if "standard" in tiers:
+            normalized[model_id] = tiers
     return normalized
 
 
@@ -4583,14 +4755,14 @@ def _load_pricing() -> PricingMap:
         return _PRICING_CACHE
     try:
         live = load_live_catalog(get_s3())
-        source = live if live is not None else DEFAULT_PRICING
+        _PRICING_CACHE = _normalize_pricing_map(live if live is not None else DEFAULT_PRICING)
         ttl = _PRICING_TTL
     except Exception as exc:
-        # Transient/corrupt S3 — serve baked-in rates, but re-check soon.
+        # Transient S3, or a corrupt object (unparseable, or a malformed tier value such as
+        # null) — serve baked-in rates, but re-check soon.
         logger.warning(json.dumps({"event": "pricing_source_unavailable", "error": str(exc)}))
-        source = DEFAULT_PRICING
+        _PRICING_CACHE = _normalize_pricing_map(DEFAULT_PRICING)
         ttl = _PRICING_RETRY_TTL
-    _PRICING_CACHE = _normalize_pricing_map(source)
     _PRICING_CACHE_AT = time.monotonic()
     _PRICING_CACHE_TTL = ttl
     return _PRICING_CACHE
@@ -4602,77 +4774,42 @@ def invalidate_cache() -> None:
     _PRICING_CACHE_AT = float("-inf")
 
 
-def _resolve_rates(model_id: str, pricing_mode: str) -> tuple[PricingRates, bool, list[str]]:
-    pricing = _load_pricing()
-    fallback_dimensions: list[str] = []
-    fallback_applied = False
+def _resolve_rates(model_id: str, service_tier: str) -> tuple[PricingRates, bool, list[str]]:
+    """Return (rates, fallback_applied, fallback_dimensions) for a model at a service tier.
 
-    model = pricing.get(model_id)
-    if not model:
-        model = _FALLBACK_BY_MODE
-        fallback_applied = True
-        fallback_dimensions.append("model_id")
-        logger.warning(
-            json.dumps(
-                {
-                    "event": "pricing_fallback_rate",
-                    "model_id": model_id,
-                    "pricing_mode": pricing_mode,
-                    "token_class": "model_id",
-                    "applied_fallback_rate": None,
-                }
-            )
+    An unknown model bills _FALLBACK_RATES at any tier. A known model without a rate for
+    the tier (incl. commitment-priced "reserved") bills that model's Standard rate (DD5).
+    """
+    model = _load_pricing().get(model_id)
+    if model is None:
+        rates, dimension = _FALLBACK_RATES, "model_id"
+    elif service_tier in model:
+        return model[service_tier], False, []
+    else:
+        rates, dimension = model["standard"], "service_tier"
+    logger.warning(
+        json.dumps(
+            {
+                "event": "pricing_fallback_rate",
+                "model_id": model_id,
+                "service_tier": service_tier,
+                "dimension": dimension,
+            }
         )
-
-    mode_rates = model.get(pricing_mode)
-    if not mode_rates:
-        mode_rates = _FALLBACK_BY_MODE[pricing_mode]
-        fallback_applied = True
-        fallback_dimensions.append("pricing_mode")
-        logger.warning(
-            json.dumps(
-                {
-                    "event": "pricing_fallback_rate",
-                    "model_id": model_id,
-                    "pricing_mode": pricing_mode,
-                    "token_class": "pricing_mode",
-                    "applied_fallback_rate": None,
-                }
-            )
-        )
-
-    resolved: PricingRates = {}
-    for key in _RATE_KEYS:
-        if key in mode_rates:
-            resolved[key] = int(mode_rates[key])
-            continue
-        resolved[key] = _FALLBACK_BY_MODE[pricing_mode][key]
-        fallback_applied = True
-        fallback_dimensions.append(key)
-        logger.warning(
-            json.dumps(
-                {
-                    "event": "pricing_fallback_rate",
-                    "model_id": model_id,
-                    "pricing_mode": pricing_mode,
-                    "token_class": key,
-                    "applied_fallback_rate": resolved[key],
-                }
-            )
-        )
-    return resolved, fallback_applied, sorted(set(fallback_dimensions))
+    )
+    return rates, True, [dimension]
 
 
 def compute_cost(
     model_id: str,
-    pricing_mode: str,
+    service_tier: str,
     input_tokens: int,
     output_tokens: int,
     cache_read_input_tokens: int,
     cache_write_input_tokens: int,
 ) -> tuple[int, dict[str, int], bool, list[str], PricingRates]:
     """Return (total_cost, component_costs, fallback_applied, fallback_dimensions, rates)."""
-    rates, fallback_applied, fallback_dimensions = _resolve_rates(model_id, pricing_mode)
+    rates, fallback_applied, fallback_dimensions = _resolve_rates(model_id, service_tier)
     components = {
         "input_usd_micros": (input_tokens * rates["input_usd_micros_per_1k"]) // 1000,
         "output_usd_micros": (output_tokens * rates["output_usd_micros_per_1k"]) // 1000,

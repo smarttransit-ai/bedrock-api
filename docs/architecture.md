@@ -111,9 +111,9 @@ Both are signed under the `bedrock` SigV4 service name and share one IAM stateme
 
 **Pricing keys are namespaced, and this is load-bearing.** litellm prices mantle models
 under `bedrock_mantle/<id>`; the catalog stores them as `mantle/<id>`. They are *not*
-merged into the flat Converse namespace because `openai.gpt-oss-safeguard-120b/20b` exist
-under **both** providers at **different** rates — a flat merge would let dict ordering
-silently re-price an existing Converse model.
+merged into the flat Converse namespace because several IDs exist under **both** providers,
+some at **different** rates (`openai.gpt-6-sol`: $2/$10 vs $2.20/$11 per 1M) — a flat merge
+would let dict ordering silently re-price an existing Converse model.
 
 Consequently the provider is chosen by **route**, never by parsing the model string
 (`openai.*` legitimately spans both). `PreflightResult.pricing_model_id` carries the

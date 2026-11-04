@@ -1,6 +1,12 @@
 """Tests for the shared litellm → catalog transform (pricing_catalog)."""
 
-from pricing_catalog import _build_entries, build_catalog, filter_bedrock
+import pytest
+from pricing_catalog import (
+    _build_entries,
+    build_catalog,
+    filter_bedrock,
+    normalize_service_tier,
+)
 
 
 def _raw() -> dict:
@@ -99,8 +105,8 @@ def test_filter_bedrock_namespaces_mantle():
 def test_mantle_collision_leaves_converse_rates_untouched():
     """The dual-provider ID must yield two distinct entries, not one racy winner."""
     cat = build_catalog(_raw())
-    converse = cat["openai.gpt-oss-safeguard-20b"]["on_demand"]
-    mantle = cat["mantle/openai.gpt-oss-safeguard-20b"]["on_demand"]
+    converse = cat["openai.gpt-oss-safeguard-20b"]["standard"]
+    mantle = cat["mantle/openai.gpt-oss-safeguard-20b"]["standard"]
     assert converse["input_usd_micros_per_1k"] == 70
     assert converse["output_usd_micros_per_1k"] == 200
     assert mantle["input_usd_micros_per_1k"] == 75
@@ -109,7 +115,7 @@ def test_mantle_collision_leaves_converse_rates_untouched():
 
 def test_mantle_rates_and_no_region_derivation():
     cat = build_catalog(_raw())
-    luna = cat["mantle/openai.gpt-5.6-luna"]["on_demand"]
+    luna = cat["mantle/openai.gpt-5.6-luna"]["standard"]
     assert luna["input_usd_micros_per_1k"] == 1100
     assert luna["output_usd_micros_per_1k"] == 6600
     assert luna["cache_read_input_usd_micros_per_1k"] == 110
@@ -137,14 +143,12 @@ def test_reasoning_cost_field_warns_rather_than_dropping(caplog):
 
 def test_build_catalog_rates_and_derivation():
     cat = build_catalog(_raw())
-    sonnet = cat["anthropic.claude-sonnet-4-6"]["on_demand"]
+    sonnet = cat["anthropic.claude-sonnet-4-6"]["standard"]
     # µUSD/1k conversion: 3.0e-06/token → 3000; 1.5e-05 → 15000
     assert sonnet["input_usd_micros_per_1k"] == 3000
     assert sonnet["output_usd_micros_per_1k"] == 15000
-    # batch mirrors on_demand
-    assert cat["anthropic.claude-sonnet-4-6"]["batch"] == sonnet
     # Pass 2a: base anthropic → us./global. derived (same rates)
-    assert cat["us.anthropic.claude-sonnet-4-6"]["on_demand"] == sonnet
+    assert cat["us.anthropic.claude-sonnet-4-6"]["standard"] == sonnet
     assert "global.anthropic.claude-sonnet-4-6" in cat
     # Pass 2b: us.deepseek.r1 → base deepseek.r1 derived
     assert "deepseek.r1-v1:0" in cat
@@ -167,6 +171,158 @@ def test_build_entries_pins_existing_behavior():
         }
     }
     entries, derived = _build_entries(vendor)
-    assert entries["anthropic.claude-x"]["on_demand"]["input_usd_micros_per_1k"] == 2000
+    assert entries["anthropic.claude-x"]["standard"]["input_usd_micros_per_1k"] == 2000
     assert "us.anthropic.claude-x" in entries  # derived
     assert "us.anthropic.claude-x" in derived
+
+
+# ---------------------------------------------------------------------------
+# Service tiers (*_flex / *_priority cost fields)
+# ---------------------------------------------------------------------------
+
+
+def _tiered(**extra) -> dict:
+    """A vendored-shape entry ($1/$2 per 1M) plus the given tier/cache cost fields."""
+    return {
+        "litellm_provider": "bedrock_converse",
+        "input_cost_per_token": 1.0e-06,
+        "output_cost_per_token": 2.0e-06,
+        **extra,
+    }
+
+
+def _tiers(entry: dict) -> dict:
+    return _build_entries({"openai.m": entry})[0]["openai.m"]
+
+
+def test_tiers_built_from_suffixed_keys():
+    tiers = _tiers(
+        _tiered(
+            input_cost_per_token_flex=5.0e-07,
+            output_cost_per_token_flex=1.0e-06,
+            input_cost_per_token_priority=1.75e-06,
+            output_cost_per_token_priority=3.5e-06,
+        )
+    )
+    assert set(tiers) == {"standard", "flex", "priority"}
+    assert tiers["flex"]["input_usd_micros_per_1k"] == 500
+    assert tiers["flex"]["output_usd_micros_per_1k"] == 1000
+    assert tiers["priority"]["input_usd_micros_per_1k"] == 1750
+    assert tiers["priority"]["output_usd_micros_per_1k"] == 3500
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"input_cost_per_token_flex": 5.0e-07},  # output missing
+        {"output_cost_per_token_flex": 1.0e-06},  # input missing
+        {"input_cost_per_token_flex": 0, "output_cost_per_token_flex": 1.0e-06},
+        {"input_cost_per_token_flex": 5.0e-07, "output_cost_per_token_flex": 0},
+    ],
+)
+def test_tier_dropped_when_missing_or_zero_over_positive_standard(extra):
+    assert set(_tiers(_tiered(**extra))) == {"standard"}
+
+
+def test_positive_tier_over_zero_standard_drops_tier():
+    entry = _tiered(
+        output_cost_per_token=0, input_cost_per_token_flex=5.0e-07, output_cost_per_token_flex=1e-7
+    )
+    assert "flex" not in _tiers(entry)
+
+
+def test_embedding_keeps_zero_output_tier():
+    entry = _tiered(
+        output_cost_per_token=0, input_cost_per_token_flex=5.0e-07, output_cost_per_token_flex=0
+    )
+    flex = _tiers(entry)["flex"]
+    assert flex["input_usd_micros_per_1k"] == 500
+    assert flex["output_usd_micros_per_1k"] == 0
+
+
+def test_zero_standard_input_uses_output_ratio_for_cache_fallback():
+    entry = _tiered(
+        input_cost_per_token=0,
+        cache_read_input_token_cost=1.0e-06,
+        input_cost_per_token_flex=0,
+        output_cost_per_token_flex=1.0e-06,
+    )
+    flex = _tiers(entry)["flex"]  # no ZeroDivisionError
+    assert flex["cache_read_input_usd_micros_per_1k"] == 500  # 1000 x (1e-6 / 2e-6)
+
+
+def test_zero_tier_cache_over_positive_standard_cache_uses_scaled_fallback():
+    entry = _tiered(
+        cache_read_input_token_cost=1.0e-07,
+        input_cost_per_token_flex=5.0e-07,
+        output_cost_per_token_flex=1.0e-06,
+        cache_read_input_token_cost_flex=0,
+    )
+    assert _tiers(entry)["flex"]["cache_read_input_usd_micros_per_1k"] == 50
+
+
+def test_tier_cache_kept_when_standard_cache_absent():
+    # Standard's cache is filled from its (positive) output rate, so a positive tier
+    # cache cost passes the zero-ness test and is kept verbatim.
+    entry = _tiered(
+        input_cost_per_token_flex=5.0e-07,
+        output_cost_per_token_flex=1.0e-06,
+        cache_read_input_token_cost_flex=3.0e-08,
+    )
+    assert _tiers(entry)["flex"]["cache_read_input_usd_micros_per_1k"] == 30
+
+
+def test_tier_cache_fallback_scales_with_input_ratio():
+    """nova-2-pro shape: no Priority cache cost, and an output ratio far from the input one.
+
+    Falling back to the tier OUTPUT rate (the Standard rule) would over-bill ~32x.
+    """
+    entry = _tiered(
+        input_cost_per_token=1.25e-06,
+        output_cost_per_token=1.0e-05,
+        cache_read_input_token_cost=3.12e-07,
+        input_cost_per_token_priority=2.1875e-06,
+        output_cost_per_token_priority=1.75e-05,
+    )
+    priority = _tiers(entry)["priority"]
+    assert priority["cache_read_input_usd_micros_per_1k"] == 546  # round(312 x 1.75)
+    assert priority["cache_write_input_usd_micros_per_1k"] == 17500  # 10000 (filled) x 1.75
+
+
+def test_standard_cache_fallback_is_output_rate():
+    std = _tiers(_tiered())["standard"]
+    assert std["cache_read_input_usd_micros_per_1k"] == 2000
+    assert std["cache_write_input_usd_micros_per_1k"] == 2000
+
+
+def test_derived_ids_carry_tiers():
+    vendor = {
+        "anthropic.claude-x": _tiered(
+            input_cost_per_token_flex=5.0e-07, output_cost_per_token_flex=1.0e-06
+        )
+    }
+    entries, _ = _build_entries(vendor)
+    assert entries["us.anthropic.claude-x"]["flex"] == entries["anthropic.claude-x"]["flex"]
+
+
+def test_no_batch_key():
+    assert not [mid for mid, tiers in build_catalog(_raw()).items() if "batch" in tiers]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, "standard"),
+        ("", "standard"),
+        ("default", "standard"),
+        ("auto", "standard"),
+        ("STANDARD", "standard"),
+        ({"type": "flex"}, "flex"),
+        ({"type": None}, "standard"),
+        ("priority", "priority"),
+        ("reserved", "reserved"),
+        (42, "standard"),
+    ],
+)
+def test_normalize_service_tier(raw, expected):
+    assert normalize_service_tier(raw) == expected

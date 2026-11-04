@@ -25,7 +25,6 @@ os.environ.setdefault("USAGE_TABLE", "test-usage")
 os.environ.setdefault("RATE_LIMIT_TABLE", "test-rate-limit")
 os.environ.setdefault("BEDROCK_REGION", "us-east-1")
 os.environ.setdefault("PRICING_BUCKET", "test-pricing")
-os.environ.setdefault("PRICING_OBJECT_KEY", "pricing/current.json")
 os.environ.setdefault("LITELLM_SOURCE_URL", "https://example.invalid/litellm.json")
 os.environ.setdefault("PRICING_CACHE_TTL_S", "60")
 
@@ -242,22 +241,22 @@ def litellm_raw_from_catalog(catalog: dict, factor: float = 1.0) -> dict:
     instead would leave a slash in the stripped key, so filter_bedrock would drop them and
     the rebuilt catalog would silently lose the whole mantle family.
 
-    ``factor`` scales every rate (used to exercise the drift band).
+    Every service tier present is emitted under its litellm cost suffix (``*_flex`` /
+    ``*_priority``). ``factor`` scales every rate (used to exercise the drift band).
     """
-    from pricing_catalog import MANTLE_NAMESPACE
+    from pricing_catalog import _COST_FIELDS, _TIER_SUFFIXES, MANTLE_NAMESPACE
 
     raw = {}
-    for model_id, modes in catalog.items():
-        od = modes["on_demand"]
+    for model_id, tiers in catalog.items():
         if model_id.startswith(MANTLE_NAMESPACE):
             key = f"bedrock_mantle/{model_id.removeprefix(MANTLE_NAMESPACE)}"
             provider = "bedrock_mantle"
         else:
             key = f"bedrock/{model_id}"
             provider = "bedrock_converse"
-        raw[key] = {
-            "litellm_provider": provider,
-            "input_cost_per_token": od["input_usd_micros_per_1k"] / 1e9 * factor,
-            "output_cost_per_token": od["output_usd_micros_per_1k"] / 1e9 * factor,
+        raw[key] = {"litellm_provider": provider} | {
+            field + _TIER_SUFFIXES[tier]: rates[rate] / 1e9 * factor
+            for tier, rates in tiers.items()
+            for rate, field in _COST_FIELDS.items()
         }
     return raw

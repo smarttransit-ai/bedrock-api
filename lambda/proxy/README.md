@@ -167,7 +167,7 @@ All log lines are JSON to CloudWatch Logs. Fields:
 
 | Field | Notes |
 |---|---|
-| `event` | `request_complete`, `request_rejected`, `usage_write_failed`, `billing_failed`, `stream_error`, `pricing_refresh`, `pricing_refresh_failed`, `pricing_read_failed`, `pricing_source_unavailable` |
+| `event` | `request_complete`, `request_rejected`, `usage_write_failed`, `billing_failed`, `stream_error`, `pricing_refresh`, `pricing_refresh_failed`, `pricing_read_failed`, `pricing_source_unavailable`, `pricing_fallback_rate`, `pricing_entry_invalid` |
 | `token_id` | The `bk_<32hex>` prefix only — never the secret |
 | `owner` | Human label from the token row |
 | `model_id` | Bedrock model/profile ID |
@@ -175,7 +175,6 @@ All log lines are JSON to CloudWatch Logs. Fields:
 | `output_tokens` | True count from Bedrock response |
 | `cache_read_input_tokens` | Bedrock cache-read token count |
 | `cache_write_input_tokens` | Bedrock cache-write token count |
-| `pricing_mode` | `on_demand` or `batch` |
 | `usd_micros` | Integer cost for this request |
 | `status` | HTTP status code |
 | `latency_ms` | Wall-clock ms |
@@ -185,6 +184,12 @@ Additional pricing audit records are emitted with:
 - `event=pricing_audit`
 - per-component micros
 - fallback flags and dimensions
+
+`pricing_fallback_rate` (WARNING) carries `model_id`, `service_tier` and `dimension`
+(`model_id`: unknown model, billed at the Opus-tier fallback; `service_tier`: known model
+without a rate for that tier, billed at its Standard rate). `pricing_entry_invalid`
+(WARNING) carries `model_id` and `tier` for a catalog tier missing its input or output
+rate; the tier is dropped, and the whole model when it is `standard`.
 
 ---
 

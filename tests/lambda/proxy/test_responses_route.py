@@ -11,9 +11,9 @@ import pytest
 from conftest import _make_token
 
 MODEL = "openai.gpt-5.6-luna"
-# Catalog rates for mantle/openai.gpt-5.6-luna: $1.10/$6.60 per 1M (µUSD per 1k tokens).
-LUNA_INPUT_RATE = 1100
-LUNA_OUTPUT_RATE = 6600
+# Catalog rates for mantle/openai.gpt-5.6-luna: $0.22/$1.32 per 1M (µUSD per 1k tokens).
+LUNA_INPUT_RATE = 220
+LUNA_OUTPUT_RATE = 1320
 # The Opus-tier fallback an uncatalogued model would hit — the bug this route must avoid.
 FALLBACK_INPUT_RATE = 15_000
 
@@ -99,7 +99,7 @@ def test_responses_happy_path_bills_at_catalog_rates(responses_client, caplog):
     assert audit["fallback_applied"] is False
     assert audit["applied_rates"]["input_usd_micros_per_1k"] == LUNA_INPUT_RATE
     assert audit["applied_rates"]["output_usd_micros_per_1k"] == LUNA_OUTPUT_RATE
-    # 1000 in + 1000 out at $1.10/$6.60 per 1M = 1100 + 6600 µUSD
+    # 1000 in + 1000 out at $0.22/$1.32 per 1M = 220 + 1320 µUSD
     assert audit["usd_micros"] == LUNA_INPUT_RATE + LUNA_OUTPUT_RATE
 
     _, usage_table, _ = tables

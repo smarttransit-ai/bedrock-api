@@ -832,8 +832,7 @@ def test_converse_stream_disconnect_with_partial_usage_writes(test_token):
         body={},
         model_id=DEFAULT_MODEL,
         pricing_model_id=DEFAULT_MODEL,
-        pricing_mode="on_demand",
-        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL, "pricing_mode": "on_demand"},
+        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL},
         start_ms=time.monotonic() * 1000,
         usage_table=usage_table,
     )
@@ -910,8 +909,7 @@ def test_sse_stream_disconnect_empty_usage_no_write(test_token):
         body={},
         model_id=DEFAULT_MODEL,
         pricing_model_id=DEFAULT_MODEL,
-        pricing_mode="on_demand",
-        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL, "pricing_mode": "on_demand"},
+        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL},
         start_ms=time.monotonic() * 1000,
         usage_table=usage_table,
     )
@@ -951,8 +949,7 @@ def test_sse_stream_disconnect_with_usage_writes(test_token):
         body={},
         model_id=DEFAULT_MODEL,
         pricing_model_id=DEFAULT_MODEL,
-        pricing_mode="on_demand",
-        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL, "pricing_mode": "on_demand"},
+        log_ctx={"token_id": token_id, "model_id": DEFAULT_MODEL},
         start_ms=time.monotonic() * 1000,
         usage_table=usage_table,
     )

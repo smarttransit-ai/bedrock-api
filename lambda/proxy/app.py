@@ -123,7 +123,6 @@ class PreflightResult:
     # every biller (streaming and non-streaming) is correct by construction: billing from
     # the bare wire ID would miss the catalog and silently charge the Opus-tier fallback.
     pricing_model_id: str
-    pricing_mode: str
     log_ctx: dict
     start_ms: float
     usage_table: object  # DynamoDB Table reference for post-flight write
@@ -139,13 +138,6 @@ def _allowed_models_default() -> list[str]:
     return [m.strip() for m in raw.split(",") if m.strip()]
 
 
-def _resolve_pricing_mode(token_row: dict) -> str:
-    mode = token_row.get("pricing_mode", "on_demand")
-    if mode in ("on_demand", "batch"):
-        return mode
-    raise BedrockError("INTERNAL_ERROR", f"Invalid pricing_mode {mode!r}", 500)
-
-
 def _error_json(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
@@ -159,7 +151,6 @@ def _handle_known_error(exc, log_ctx: dict, start_ms: float) -> JSONResponse:
                 "event": "pricing_audit",
                 "fallback_applied": False,
                 "fallback_dimensions": [],
-                "pricing_mode": log_ctx.get("pricing_mode", "on_demand"),
                 "component_micros": {},
                 "usd_micros": log_ctx.get("usd_micros"),
                 "token_counters": {
@@ -270,14 +261,6 @@ async def run_preflight(
     # body-carried model is gated exactly like a path-carried one.
     check_model_allowlist(model_id, token_row, _allowed_models_default())
 
-    raw_mode = token_row.get("pricing_mode", "on_demand")
-    if raw_mode not in ("on_demand", "batch"):
-        logger.warning(
-            json.dumps({**log_ctx, "event": "pricing_mode_invalid", "pricing_mode": raw_mode})
-        )
-    pricing_mode = _resolve_pricing_mode(token_row)
-    log_ctx["pricing_mode"] = pricing_mode
-
     return PreflightResult(
         token_id=token_id,
         token_row=token_row,
@@ -287,7 +270,6 @@ async def run_preflight(
         pricing_model_id=(
             f"{MANTLE_NAMESPACE}{model_id}" if route == ROUTE_RESPONSES else model_id
         ),
-        pricing_mode=pricing_mode,
         log_ctx=log_ctx,
         start_ms=start_ms,
         usage_table=usage_table,
@@ -362,7 +344,7 @@ def _bill_nonstreaming_response(
             applied_rates,
         ) = compute_cost(
             model_id=pf.pricing_model_id,
-            pricing_mode=pf.pricing_mode,
+            service_tier=usage.get("service_tier", "standard"),
             input_tokens=in_tok,
             output_tokens=out_tok,
             cache_read_input_tokens=cache_read_tok,
@@ -674,7 +656,7 @@ def _post_flight_write(usage_out: dict, pf: PreflightResult, log_ctx: dict) -> N
             applied_rates,
         ) = compute_cost(
             model_id=pf.pricing_model_id,
-            pricing_mode=pf.pricing_mode,
+            service_tier=usage_out.get("service_tier", "standard"),
             input_tokens=in_tok,
             output_tokens=out_tok,
             cache_read_input_tokens=cache_read_tok,

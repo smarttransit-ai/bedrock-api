@@ -128,29 +128,6 @@ def test_happy_path_with_cache_tokens(app_client):
 
 
 # ---------------------------------------------------------------------------
-# Test 3: invalid pricing mode → 500
-# ---------------------------------------------------------------------------
-
-
-def test_invalid_pricing_mode_rejected(app_client):
-    http_client, token_id, bearer_token, tables, stubber = app_client
-    tokens_table, _, _ = tables
-
-    tokens_table.update_item(
-        Key={"token_id": token_id},
-        UpdateExpression="SET pricing_mode = :v",
-        ExpressionAttributeValues={":v": "oops"},
-    )
-
-    with stubber:
-        resp = http_client.post(
-            _converse_path(), json=_converse_body(), headers=_auth_headers(bearer_token)
-        )
-
-    assert resp.status_code == 500
-
-
-# ---------------------------------------------------------------------------
 # Test 4: revoked token → 401
 # ---------------------------------------------------------------------------
 

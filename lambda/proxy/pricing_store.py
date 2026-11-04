@@ -1,7 +1,7 @@
 """S3-backed live pricing catalog — the single runtime source of pricing.
 
 The live catalog is one JSON object in S3 (``PRICING_BUCKET`` / ``PRICING_OBJECT_KEY``):
-    {"catalog": {<model_id>: {on_demand, batch}}, "meta": {...}}
+    {"catalog": {<model_id>: {standard, flex?, priority?}}, "meta": {...}}
 
 ``pricing.py`` reads it (TTL-cached) and falls back to the baked-in DEFAULT_PRICING
 when it is absent or unreachable. ``pricing_refresh.py`` writes it.
@@ -15,7 +15,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-PRICING_OBJECT_KEY = os.environ.get("PRICING_OBJECT_KEY", "pricing/current.json")
+PRICING_OBJECT_KEY = os.environ.get("PRICING_OBJECT_KEY", "pricing/catalog-v2.json")
 
 
 def _load_object(s3) -> dict | None:
