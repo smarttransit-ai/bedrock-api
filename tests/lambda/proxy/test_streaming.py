@@ -16,6 +16,7 @@ Plus bedrock-level unit tests:
   - iter_invoke_stream cache token extraction (B2)
 """
 
+import io
 import json
 import time
 from datetime import UTC, datetime
@@ -1071,6 +1072,17 @@ def test_iter_invoke_stream_fallback_from_metrics():
     assert usage_out["output_tokens"] == 10
     # Cache counters remain unset
     assert usage_out.get("cache_read_input_tokens", 0) == 0
+    assert "usage_missing" not in usage_out
+
+
+def test_iter_invoke_stream_metadata_without_input_flags_missing():
+    from bedrock import iter_invoke_stream
+
+    chunk = json.dumps({"metadata": {"usage": {"outputTokens": 3}}}).encode()
+    usage_out = {}
+    list(iter_invoke_stream(iter([{"chunk": {"bytes": chunk}}]), usage_out))
+    assert usage_out["output_tokens"] == 3
+    assert usage_out["usage_missing"] is True
     assert usage_out.get("cache_write_input_tokens", 0) == 0
 
 
@@ -1217,3 +1229,29 @@ def test_stream_error_without_tokens_stays_silent_in_the_gate(test_token, caplog
         list(_sse_stream(_failing(), {"service_tier": "standard"}, pf, dict(pf.log_ctx)))
     assert any("stream_error" in r.message for r in caplog.records)
     assert not any("usage_parse_warning" in r.message for r in caplog.records)
+
+
+@pytest.mark.parametrize("route", ["converse", "converse-stream", "invoke"])
+def test_usage_without_input_warns_once_with_model_id(test_token, caplog, route):
+    """``usage: {}`` still bills (at 0), and logs one usage_parse_warning from _bill."""
+    mock_client = MagicMock()
+    if route == "converse":
+        mock_client.converse.return_value = {"output": {}, "usage": {}}
+    elif route == "converse-stream":
+        mock_client.converse_stream.return_value = {"stream": iter([{"metadata": {"usage": {}}}])}
+    else:
+        mock_client.invoke_model.return_value = {"body": io.BytesIO(b'{"usage": {}}')}
+    http_client, token_id, bearer_token, tables = _make_app_client_with_mock(
+        test_token, mock_client
+    )
+    body = _invoke_body() if route == "invoke" else _converse_body()
+    with http_client as client, caplog.at_level("INFO"):
+        resp = client.post(
+            f"/model/{ENCODED_MODEL}/{route}", json=body, headers=_auth_headers(bearer_token)
+        )
+
+    assert resp.status_code == 200
+    (warning,) = [json.loads(r.message) for r in caplog.records if "usage_parse" in r.message]
+    assert warning["field"] == "usage" and warning["model_id"] == DEFAULT_MODEL
+    assert not [r for r in caplog.records if "usage_missing" in r.message]
+    assert int(usage_row(tables[1], token_id)["requests"]) == 1

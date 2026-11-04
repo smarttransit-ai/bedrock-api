@@ -313,11 +313,14 @@ def _bill(usage: dict, pf: PreflightResult, log_ctx: dict, *, completed: bool = 
     The single billing tail for every route, streaming and non-streaming — they differ only
     in transport, so billing and observability stay single-sourced. ``usage`` is read-only.
 
+    An extractor flags ``usage_missing`` when the upstream reported no input count; that is
+    logged once here as ``usage_parse_warning`` (with ``model_id``), then billing proceeds.
+
     Token gate: when no TOKEN_KEYS were reported (a client disconnect, or a usage-less
     ``response.failed``) nothing is written. If the call ran to ``completed`` anyway, that
-    is logged as ``usage_parse_warning``, so no request ends at $0 without a log line. A
-    partial stream bills the counters it did receive. The tier billed is the one the
-    upstream reported (``service_tier``), Standard when it reported none.
+    is logged as ``usage_parse_warning`` (unless already flagged), so no request ends at $0
+    without a log line. A partial stream bills the counters it did receive. The tier billed
+    is the one the upstream reported (``service_tier``), Standard when it reported none.
 
     Observability:
       - compute_cost failure → logs ``billing_failed`` and returns early
@@ -330,9 +333,12 @@ def _bill(usage: dict, pf: PreflightResult, log_ctx: dict, *, completed: bool = 
     silently charging the Opus-tier fallback.
     """
     log_ctx.update({k: usage[k] for k in _LOGGED_EXTRAS if k in usage})
-    if not any(k in usage for k in TOKEN_KEYS):
-        if completed:
-            logger.warning(json.dumps({**log_ctx, "event": "usage_parse_warning"}))
+    has_tokens = any(k in usage for k in TOKEN_KEYS)
+    if usage.get("usage_missing"):
+        logger.warning(json.dumps({**log_ctx, "event": "usage_parse_warning", "field": "usage"}))
+    elif completed and not has_tokens:
+        logger.warning(json.dumps({**log_ctx, "event": "usage_parse_warning"}))
+    if not has_tokens:
         return
 
     counts = {k: usage.get(k, 0) for k in TOKEN_KEYS}

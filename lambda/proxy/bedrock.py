@@ -149,16 +149,21 @@ def _has_key(payload: dict, key_or_keys: str | list[str]) -> bool:
 
 
 def normalize_usage(
-    usage_payload: dict | None, key_map: dict[str, str | list[str]]
-) -> dict[str, int]:
+    usage_payload: object, key_map: dict[str, str | list[str]]
+) -> dict[str, int | bool]:
+    """Read TOKEN_KEYS from *usage_payload* via *key_map*, defaulting each to 0.
+
+    A payload that is not a dict, or holds no input-token alias, also sets ``usage_missing``
+    (and nothing otherwise). It is not a token key: app._bill logs it once, with the model,
+    as ``usage_parse_warning``. iter_invoke_stream's Claude path parses counters directly and
+    relies on _bill's completed-without-tokens warning instead.
+    """
     if not isinstance(usage_payload, dict):
-        logger.warning(
-            json.dumps(
-                {"event": "usage_parse_warning", "field": "usage", "raw_value": usage_payload}
-            )
-        )
         usage_payload = {}
-    return {k: _parse_base10_int(_extract_value(usage_payload, key_map[k]), k) for k in TOKEN_KEYS}
+    usage = {k: _parse_base10_int(_extract_value(usage_payload, key_map[k]), k) for k in TOKEN_KEYS}
+    if not _has_key(usage_payload, key_map["input_tokens"]):
+        usage["usage_missing"] = True
+    return usage
 
 
 def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str]]:
@@ -209,10 +214,6 @@ def forward_invoke_model(
     header_counts = {h: headers[h] for h in _COUNT_HEADERS if h in headers}
     body_usage = response_body.get("usage")
     merged = {**header_counts, **(body_usage if isinstance(body_usage, dict) else {})}
-    if not _has_key(merged, _INVOKE_KEY_MAP["input_tokens"]):
-        logger.warning(
-            json.dumps({"event": "usage_parse_warning", "field": "usage", "model_id": model_id})
-        )
     usage = normalize_usage(merged, _INVOKE_KEY_MAP)
     usage["service_tier"] = normalize_service_tier(response.get("serviceTier"))
     if "serviceTier" in response:

@@ -385,7 +385,7 @@ def test_usageless_failed_stream_warns_and_writes_nothing(responses_client, capl
         )
     assert usage_row(tables[1], token_id) == {}
     (warning,) = [json.loads(r.message) for r in caplog.records if "usage_parse" in r.message]
-    assert warning["model_id"] == MODEL
+    assert warning["model_id"] == MODEL and warning["field"] == "usage"
     assert warning["terminal_event"] == "response.failed"
 
 
@@ -420,3 +420,25 @@ def test_nonstreaming_logs_reasoning_tokens(responses_client, caplog):
             "/openai/v1/responses", json={"model": MODEL, "input": "hi"}, headers=_auth(bearer)
         )
     assert _pricing_audit(caplog)["reasoning_tokens"] == 800
+
+
+@pytest.mark.parametrize(
+    ("handler", "stream"),
+    [
+        (lambda request: httpx.Response(200, json={"output": [], "usage": {}}), False),
+        (_terminal_sse("response.completed", {"usage": {}}), True),
+    ],
+)
+def test_usage_without_input_warns_once_with_model_id(responses_client, caplog, handler, stream):
+    make, token_id, bearer, tables = responses_client
+    with caplog.at_level("INFO"):
+        resp = make(handler).post(
+            "/openai/v1/responses",
+            json={"model": MODEL, "input": "hi", "stream": stream},
+            headers=_auth(bearer),
+        )
+    assert resp.status_code == 200
+    (warning,) = [json.loads(r.message) for r in caplog.records if "usage_parse" in r.message]
+    assert warning["field"] == "usage" and warning["model_id"] == MODEL
+    assert not [r for r in caplog.records if "usage_missing" in r.message]
+    assert int(usage_row(tables[1], token_id)["requests"]) == 1

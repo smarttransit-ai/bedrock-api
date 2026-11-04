@@ -13,7 +13,7 @@ from bedrock import (
 from routes import ROUTE_CONVERSE, ROUTE_INVOKE, ROUTE_RESPONSES
 
 
-def test_normalize_usage_non_dict_defaults_zero():
+def test_normalize_usage_non_dict_defaults_zero_and_flags_missing():
     usage = normalize_usage(
         None,
         {
@@ -28,6 +28,7 @@ def test_normalize_usage_non_dict_defaults_zero():
         "output_tokens": 0,
         "cache_read_input_tokens": 0,
         "cache_write_input_tokens": 0,
+        "usage_missing": True,
     }
 
 
@@ -50,6 +51,7 @@ def test_normalize_usage_parsing_and_clamping():
     assert usage["output_tokens"] == 0
     assert usage["cache_read_input_tokens"] == 0
     assert usage["cache_write_input_tokens"] == 9_223_372_036_854_775_807
+    assert "usage_missing" not in usage  # an input alias was present
 
 
 def test_normalize_usage_supports_alias_keys():
@@ -152,6 +154,14 @@ def test_forward_invoke_model_anthropic_zero_wins_when_key_present():
     assert usage["output_tokens"] == 0
 
 
+@pytest.mark.parametrize(
+    ("usage", "missing"), [({}, True), ({"outputTokens": 5}, True), (_CONVERSE["usage"], False)]
+)
+def test_forward_converse_flags_usage_missing_without_input(usage, missing):
+    _, out = forward_converse(_Client({**_CONVERSE, "usage": usage}), "m", {})
+    assert out.get("usage_missing", False) is missing
+
+
 @pytest.mark.parametrize(("tier", "expected"), [({"type": "flex"}, "flex"), (None, "standard")])
 def test_forward_converse_reports_service_tier(tier, expected):
     response = {**_CONVERSE, **({"serviceTier": tier} if tier else {})}
@@ -220,15 +230,15 @@ def test_forward_invoke_model_body_usage_wins_over_headers(body_usage):
     assert usage["output_tokens"] == 8
 
 
-def test_forward_invoke_model_usageless_body_warns_and_returns_zero(caplog):
+def test_forward_invoke_model_usageless_body_flags_missing_and_returns_zero(caplog):
     with caplog.at_level("WARNING"):
         _, usage = forward_invoke_model(_Client({"body": _Body({"images": []})}), "m", {})
-    assert {k: usage[k] for k in ("input_tokens", "output_tokens")} == {
+    assert {k: usage[k] for k in ("input_tokens", "output_tokens", "usage_missing")} == {
         "input_tokens": 0,
         "output_tokens": 0,
+        "usage_missing": True,
     }
-    warnings = [json.loads(r.message) for r in caplog.records if "usage_parse" in r.message]
-    assert warnings == [{"event": "usage_parse_warning", "field": "usage", "model_id": "m"}]
+    assert not caplog.records  # app._bill logs it, once, with the request context
 
 
 @pytest.mark.parametrize(("tier", "forwarded"), [("priority", True), (None, False), ("", False)])

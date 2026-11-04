@@ -126,17 +126,20 @@ floats).
 
 **Catalog shape:** `{model_id: {"standard": rates, "flex"?: rates, "priority"?: rates}}`,
 built from litellm's base and `*_flex` / `*_priority` cost fields. A Flex/Priority tier is
-kept only when its input and output costs are present and each matches Standard on
-zero-ness (so an upstream `*_flex: 0` cannot make a model free). A missing Standard cache
-cost defaults to the output rate; a missing or zero-mismatched tier cache cost becomes
-Standard's cache rate scaled by the tier's input-cost ratio (output-cost ratio when
-Standard input is 0). Any corrupt upstream price field (negative, non-finite, bool or
-string) rejects the whole build, so a refresh fails closed and the last good catalog stays
-live. When reading the live catalog, a malformed tier (not an object, missing
-its input or output rate, or any rate that isn't a non-negative integer) is logged as
-`pricing_entry_invalid` and replaced by the baked-in `DEFAULT_PRICING` rate for that model
-and tier; with no baked-in rate it is dropped, and so is the whole model when that leaves no
-`standard` tier. A live catalog with no valid entry at all is treated as corrupt.
+kept only when its input and output costs are present. A missing Standard cache cost
+defaults to the output rate; a missing tier cache cost (or one that differs on zero-ness
+from Standard's filled cache rate) becomes Standard's cache rate scaled by the tier's
+input-cost ratio. Any corrupt or implausible upstream price field rejects the whole build,
+so a refresh fails closed and the last good catalog stays live: a value that is negative,
+non-finite, bool or string; a positive cost outside $0.0001 to $1,000 per 1M tokens; a
+Standard input of 0 with a paid output; or a Flex/Priority cost that differs from the
+matching Standard cost on zero-ness or by more than 4x either way. Reading the live catalog
+follows one rule: any corrupt entry (a model that isn't an object or has no `standard`
+tier, or a present tier that isn't an object, lacks its input or output rate, or holds a
+rate that isn't a non-negative integer) — or an empty catalog — makes the whole object
+corrupt, so every model bills `DEFAULT_PRICING` (logged as `pricing_source_unavailable`)
+until the next re-check; a model only the live catalog knows bills the Opus-tier fallback
+meanwhile. A refresh never writes such an object, since its build is stricter.
 
 **Source of rates — single path:** the live catalog is one S3 object
 (`PRICING_BUCKET`/`pricing/catalog-v2.json`), read per-instance and cached for
@@ -194,7 +197,7 @@ All log lines are JSON to CloudWatch Logs. Fields:
 
 | Field | Notes |
 |---|---|
-| `event` | `request_complete`, `request_rejected`, `usage_write_failed`, `billing_failed`, `usage_parse_warning`, `stream_error`, `pricing_refresh`, `pricing_refresh_failed`, `pricing_read_failed`, `pricing_source_unavailable`, `pricing_fallback_rate`, `pricing_entry_invalid` |
+| `event` | `request_complete`, `request_rejected`, `usage_write_failed`, `billing_failed`, `usage_parse_warning`, `stream_error`, `pricing_refresh`, `pricing_refresh_failed`, `pricing_read_failed`, `pricing_source_unavailable`, `pricing_fallback_rate` |
 | `token_id` | The `bk_<32hex>` prefix only — never the secret |
 | `owner` | Human label from the token row |
 | `model_id` | Bedrock model/profile ID |
@@ -217,9 +220,14 @@ Additional pricing audit records are emitted with:
 
 `pricing_fallback_rate` (WARNING) carries `model_id`, `service_tier` and `dimension`
 (`model_id`: unknown model, billed at the Opus-tier fallback; `service_tier`: known model
-without a rate for that tier, billed at its Standard rate). `pricing_entry_invalid`
-(WARNING) carries `model_id` and `tier` for a malformed live-catalog tier; it is replaced
-from `DEFAULT_PRICING` when possible, else dropped (the whole model when it is `standard`).
+without a rate for that tier, billed at its Standard rate). `pricing_source_unavailable`
+(WARNING) carries `error`: S3 was unreachable or the live object was corrupt (including
+any invalid entry, which names its model and tier), so every model bills `DEFAULT_PRICING`
+and the catalog is re-read after a short retry interval. `usage_parse_warning` (WARNING)
+with `field=usage` carries `model_id`: the upstream usage held no input-token count. The
+call still bills the counts it did report (zero when none), except a Responses stream whose
+terminal event carries no usage object, which writes nothing. Without `field`, it marks a
+stream that completed with no token counts at all, so nothing was billed.
 
 ---
 

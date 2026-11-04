@@ -302,7 +302,7 @@ def test_stream_harvests_usage_before_relaying_the_terminal_line():
     assert usage_out["output_tokens"] == 100
 
 
-def test_stream_terminal_event_without_usage_leaves_no_token_keys():
+def test_stream_terminal_event_without_usage_leaves_no_token_keys_and_flags_missing():
     resp = open_responses_stream(
         _client(_sse(_terminal("response.failed", {"service_tier": "auto"}))),
         "openai.gpt-oss-120b",
@@ -310,11 +310,15 @@ def test_stream_terminal_event_without_usage_leaves_no_token_keys():
     )
     usage_out: dict = {}
     list(iter_responses_sse(resp, usage_out))
-    assert usage_out == {"service_tier": "standard", "terminal_event": "response.failed"}
+    assert usage_out == {
+        "service_tier": "standard",
+        "terminal_event": "response.failed",
+        "usage_missing": True,
+    }
 
 
 @pytest.mark.parametrize("response", ["x", {"usage": "x"}, {"usage": ["x"]}])
-def test_stream_malformed_terminal_response_leaves_no_token_keys(response):
+def test_stream_malformed_terminal_response_leaves_no_token_keys_and_flags_missing(response):
     resp = open_responses_stream(
         _client(_sse(_terminal("response.completed", response))),
         "openai.gpt-oss-120b",
@@ -323,13 +327,19 @@ def test_stream_malformed_terminal_response_leaves_no_token_keys(response):
     usage_out: dict = {}
     lines = list(iter_responses_sse(resp, usage_out))
     assert any(line.startswith("data: ") for line in lines)  # still relayed
-    assert usage_out == {"service_tier": "standard", "terminal_event": "response.completed"}
+    assert usage_out == {
+        "service_tier": "standard",
+        "terminal_event": "response.completed",
+        "usage_missing": True,
+    }
 
 
-def test_forward_responses_without_usage_warns(caplog):
+@pytest.mark.parametrize("body", [{"output": []}, {"output": [], "usage": "x"}])
+def test_forward_responses_without_usage_flags_missing_without_logging(caplog, body):
     with caplog.at_level("WARNING"):
-        forward_responses(_client(_ok({"output": []})), "openai.gpt-oss-120b", {"input": "hi"})
-    assert any("usage_parse_warning" in r.message for r in caplog.records)
+        _, usage = forward_responses(_client(_ok(body)), "openai.gpt-oss-120b", {"input": "hi"})
+    assert usage["usage_missing"] is True
+    assert not caplog.records  # app._bill logs it once; normalize_usage never double-warns
 
 
 def test_stream_sets_stream_true_in_body():

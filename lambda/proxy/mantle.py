@@ -84,7 +84,7 @@ def _raise_mantle_error(status: int, payload: dict | None) -> None:
     raise BedrockError(code, message, mapped_status)
 
 
-def _flatten_usage(usage: dict | None) -> dict:
+def _flatten_usage(usage: object) -> dict:
     """Flatten the Responses usage shape so normalize_usage (flat reader) can read it.
 
     Responses nests cache counters one level down:
@@ -97,7 +97,7 @@ def _flatten_usage(usage: dict | None) -> dict:
     Converse key-map contract untouched — one call site absorbs the shape difference.
     """
     if not isinstance(usage, dict):
-        return usage  # normalize_usage logs usage_parse_warning for a non-dict
+        return {}  # normalize_usage flags it usage_missing
     flat = dict(usage)
     for detail_key in ("input_tokens_details", "output_tokens_details"):
         details = usage.get(detail_key)
@@ -150,9 +150,9 @@ def _to_exclusive_input(usage: dict[str, int]) -> dict[str, int]:
     return usage
 
 
-def reasoning_tokens_of(usage: dict | None) -> int:
+def reasoning_tokens_of(usage: object) -> int:
     """Reasoning-token count for logging only (never a billing dimension — see USAGE_KEY_MAP)."""
-    details = (usage or {}).get("output_tokens_details")
+    details = usage.get("output_tokens_details") if isinstance(usage, dict) else None
     value = details.get("reasoning_tokens") if isinstance(details, dict) else 0
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
@@ -217,7 +217,8 @@ def iter_responses_sse(resp, usage_out: dict) -> Generator[str, None, None]:
 
     Usage and the service tier arrive on the terminal event (any of _TERMINAL_EVENTS, under
     ``data.response``); its type is recorded as ``terminal_event``. A terminal event without
-    usage (e.g. a ``response.failed`` before any tokens) leaves no token keys, so nothing bills.
+    usage (e.g. a ``response.failed`` before any tokens) leaves no token keys, so nothing
+    bills, and sets ``usage_missing`` so _bill logs it.
     Closing the response here is mandatory: unlike boto3's GC-managed EventStream, an httpx
     streaming response holds its connection until explicitly closed.
     """
@@ -237,6 +238,8 @@ def iter_responses_sse(resp, usage_out: dict) -> Generator[str, None, None]:
                         _to_exclusive_input(normalize_usage(_flatten_usage(usage), USAGE_KEY_MAP))
                     )
                     usage_out["reasoning_tokens"] = reasoning_tokens_of(usage)
+                else:
+                    usage_out["usage_missing"] = True
             yield f"{line}\n"
     finally:
         resp.close()

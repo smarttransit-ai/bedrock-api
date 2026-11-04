@@ -97,40 +97,33 @@ def test_unknown_model_uses_fallback_rates_at_any_tier(tier):
     assert fallback_dimensions == ["model_id"]
 
 
-def test_normalize_pricing_map_drops_model_without_valid_standard(caplog):
+def test_normalize_pricing_map_defaults_cache_rates_and_allows_absent_tiers():
     from pricing import _normalize_pricing_map
 
-    with caplog.at_level("WARNING"):
-        normalized = _normalize_pricing_map(
-            {
-                "no-standard": {"flex": _FLEX},
-                "old-shape": {"on_demand": _STANDARD},
-                "bad-standard": {"standard": {"input_usd_micros_per_1k": 1}, "flex": _FLEX},
-                "ok": {"standard": _STANDARD},
-            }
-        )
-    assert list(normalized) == ["ok"]
-    # Cache rates default to the output rate.
-    assert normalized["ok"]["standard"]["cache_read_input_usd_micros_per_1k"] == 2000
-    # Every dropped model is logged — an old-shape catalog must not vanish silently.
-    warnings = [json.loads(r.message) for r in caplog.records if "pricing_entry" in r.message]
-    assert {(w["model_id"], w["tier"]) for w in warnings} == {
-        ("no-standard", "standard"),
-        ("old-shape", "standard"),
-        ("bad-standard", "standard"),
-    }
+    normalized = _normalize_pricing_map({"m": {"standard": _STANDARD}})
+    assert list(normalized["m"]) == ["standard"]  # absent Flex/Priority is normal
+    assert normalized["m"]["standard"]["cache_read_input_usd_micros_per_1k"] == 2000
 
 
-def test_normalize_pricing_map_drops_only_invalid_tier(caplog):
+_CORRUPT_ENTRIES = {
+    "non_dict_model": (None, "not an object"),
+    "missing_standard": ({"flex": _FLEX}, "standard"),
+    "old_shape": ({"on_demand": _STANDARD}, "standard"),
+    "wrong_type_rate": (
+        {"standard": {"input_usd_micros_per_1k": "abc", "output_usd_micros_per_1k": 1}},
+        "standard",
+    ),
+    "invalid_flex": ({"standard": _STANDARD, "flex": {"input_usd_micros_per_1k": 1}}, "flex"),
+    "null_priority": ({"standard": _STANDARD, "priority": None}, "priority"),
+}
+
+
+@pytest.mark.parametrize(("entry", "tier"), _CORRUPT_ENTRIES.values(), ids=list(_CORRUPT_ENTRIES))
+def test_normalize_pricing_map_raises_on_corrupt_entry(entry, tier):
     from pricing import _normalize_pricing_map
 
-    with caplog.at_level("WARNING"):
-        normalized = _normalize_pricing_map(
-            {"m": {"standard": _STANDARD, "flex": {"input_usd_micros_per_1k": 1}}}
-        )
-    assert list(normalized["m"]) == ["standard"]
-    warning = json.loads(next(r.message for r in caplog.records if "pricing_entry" in r.message))
-    assert warning == {"event": "pricing_entry_invalid", "model_id": "m", "tier": "flex"}
+    with pytest.raises(ValueError, match=f"bad.model: {tier}"):
+        _normalize_pricing_map({"ok": {"standard": _STANDARD}, "bad.model": entry})
 
 
 # ---------------------------------------------------------------------------
@@ -269,35 +262,26 @@ def test_corrupt_live_catalog_falls_back_to_default(pricing_bucket):
     assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
 
 
-def test_malformed_live_tier_drops_only_that_tier(pricing_bucket, caplog):
-    """A wrong-typed tier is dropped on its own; the rest of the live catalog still bills."""
-    good = {"input_usd_micros_per_1k": 7, "output_usd_micros_per_1k": 9}
-    _set_live(
-        {
-            "a.model": {"standard": good, "flex": None},
-            "b.model": {
-                "standard": {"input_usd_micros_per_1k": "abc", "output_usd_micros_per_1k": 1}
-            },
-            "c.model": {"standard": good},
-        }
-    )
+@pytest.mark.parametrize(
+    "corrupt",
+    [*(e for e, _ in _CORRUPT_ENTRIES.values()), "empty"],
+    ids=[*_CORRUPT_ENTRIES, "empty"],
+)
+def test_corrupt_live_entry_bills_default_pricing_for_every_model(pricing_bucket, caplog, corrupt):
+    """One corrupt entry (or an empty catalog) condemns the whole live object."""
+    from pricing import DEFAULT_PRICING
+
+    mid = "openai.gpt-oss-120b-1:0"
+    live = {mid: {"standard": _STANDARD}, "bad.model": corrupt} if corrupt != "empty" else {}
+    _set_live(live)
     with caplog.at_level(logging.WARNING):
-        a_std = compute_cost("a.model", "standard", 1000, 0, 0, 0)
-        a_flex = compute_cost("a.model", "flex", 1000, 0, 0, 0)
-        b_std = compute_cost("b.model", "standard", 1000, 0, 0, 0)
-        c_std = compute_cost("c.model", "standard", 1000, 0, 0, 0)
-    assert a_std[0] == 7 and a_std[2] is False
-    assert a_flex[0] == 7 and a_flex[3] == ["service_tier"]  # bad Flex → model Standard
-    assert b_std[3] == ["model_id"]  # bad Standard → model dropped → unknown-model fallback
-    assert c_std[0] == 7 and c_std[2] is False  # live catalog kept, not DEFAULT_PRICING
-    assert pricing._PRICING_CACHE_TTL == pricing._PRICING_TTL
-    invalid = [
-        json.loads(r.message) for r in caplog.records if "pricing_entry_invalid" in r.message
-    ]
-    assert {(e["model_id"], e["tier"]) for e in invalid} == {
-        ("a.model", "flex"),
-        ("b.model", "standard"),
-    }
+        for tier in ("standard", "flex"):
+            cost, _, fallback_applied, _, _ = compute_cost(mid, tier, 1000, 0, 0, 0)
+            assert cost == DEFAULT_PRICING[mid][tier]["input_usd_micros_per_1k"]  # not live 1000
+            assert fallback_applied is False
+    assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
+    events = [json.loads(r.message)["event"] for r in caplog.records]
+    assert events.count("pricing_source_unavailable") == 1
 
 
 @pytest.mark.parametrize("bad", [-5, True, 1.9, "12", float("inf"), None])
@@ -307,48 +291,6 @@ def test_normalize_rates_rejects_non_int_or_negative_rates(bad):
     good = {"input_usd_micros_per_1k": 7, "output_usd_micros_per_1k": 9}
     for key in (*good, "cache_read_input_usd_micros_per_1k"):
         assert _normalize_rates({**good, key: bad}) is None
-
-
-@pytest.mark.parametrize("tier", ["standard", "priority"])
-def test_invalid_live_tier_is_replaced_from_default_pricing(pricing_bucket, tier):
-    """A bad live tier on a baked-in model bills the baked-in rate for that tier — not the
-    model's Standard rate (bad Priority) nor the Opus-tier fallback (bad Standard)."""
-    from pricing import DEFAULT_PRICING
-
-    mid = "openai.gpt-oss-120b-1:0"
-    _set_live({mid: {**DEFAULT_PRICING[mid], tier: {"input_usd_micros_per_1k": -1}}})
-    cost, _, fallback_applied, _, _ = compute_cost(mid, tier, 1000, 0, 0, 0)
-    assert cost == DEFAULT_PRICING[mid][tier]["input_usd_micros_per_1k"]
-    assert fallback_applied is False
-
-
-def test_non_dict_live_model_recovers_every_baked_in_tier(pricing_bucket, caplog):
-    from pricing import DEFAULT_PRICING
-
-    mid = "openai.gpt-oss-120b-1:0"
-    std = {"input_usd_micros_per_1k": 1, "output_usd_micros_per_1k": 1}
-    _set_live({mid: None, "x.model": None, "c.model": {"standard": std}})
-    with caplog.at_level(logging.WARNING):
-        for tier in ("standard", "flex"):
-            cost, _, fallback_applied, _, _ = compute_cost(mid, tier, 1000, 0, 0, 0)
-            assert cost == DEFAULT_PRICING[mid][tier]["input_usd_micros_per_1k"]
-            assert fallback_applied is False
-        assert compute_cost("x.model", "standard", 1, 0, 0, 0)[3] == ["model_id"]  # dropped
-    invalid = {
-        (e["model_id"], e["tier"])
-        for e in (json.loads(r.message) for r in caplog.records)
-        if e.get("event") == "pricing_entry_invalid"
-    }
-    assert invalid == {(mid, t) for t in DEFAULT_PRICING[mid]} | {("x.model", "standard")}
-
-
-def test_live_catalog_with_no_valid_entry_falls_back_with_short_retry(pricing_bucket):
-    _set_live({"x.model": {"standard": {"input_usd_micros_per_1k": "nope"}}})
-    _, _, fallback_applied, _, _ = compute_cost(
-        "us.anthropic.claude-sonnet-4-6", "standard", 1, 1, 0, 0
-    )
-    assert fallback_applied is False  # DEFAULT_PRICING served
-    assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
 
 
 def test_transient_s3_error_falls_back_and_short_retry(monkeypatch):

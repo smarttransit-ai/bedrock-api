@@ -4716,8 +4716,7 @@ def _normalize_rates(rates: object) -> PricingRates | None:
     """Return int rates with cache rates defaulted to output, or None if the tier is unusable.
 
     Unusable means not a dict, missing input/output, or any rate that isn't a non-negative
-    int — a negative rate would credit budgets back. The caller replaces or drops one bad
-    tier on its own.
+    int — a negative rate would credit budgets back.
     """
     if not isinstance(rates, dict):
         return None
@@ -4738,36 +4737,26 @@ def _normalize_rates(rates: object) -> PricingRates | None:
         return None
 
 
-def _normalize_pricing_map(raw_map: dict, fallback: PricingMap | None = None) -> PricingMap:
-    """Keep each service tier that normalizes; drop a model whose Standard tier does not and
-    cannot be replaced from *fallback*.
+def _normalize_pricing_map(raw_map: dict) -> PricingMap:
+    """Normalize every model's service tiers; raise ValueError on any corrupt entry.
 
-    A present-but-invalid tier is logged and, when *fallback* (the normalized baked-in
-    DEFAULT_PRICING) holds that model and tier, replaced by the baked-in rate — closer to
-    the truth than billing Standard (a bad Priority tier) or the Opus-tier fallback (a bad
-    Standard tier).
+    Corrupt means a model that isn't an object, has no ``standard`` tier, or carries a
+    present-but-invalid tier (absent Flex/Priority is normal). One bad entry condemns the
+    whole object: a live catalog that corrupt is not trusted for any model.
     """
-    fallback = fallback or {}
     normalized: PricingMap = {}
     for model_id, value in raw_map.items():
         if not isinstance(value, dict):
-            # Treat Standard, and each tier the baked-in catalog has, as present-but-invalid:
-            # each is logged and replaced from *fallback*, or the model is dropped.
-            value = dict.fromkeys({"standard", *fallback.get(model_id, {})})
+            raise ValueError(f"invalid pricing entry for {model_id}: not an object")
+        if "standard" not in value:
+            raise ValueError(f"invalid pricing entry for {model_id}: standard")
         tiers: PricingTierMap = {}
         for tier in SERVICE_TIERS:
-            rates = _normalize_rates(value[tier]) if tier in value else None
-            if rates is None and (tier in value or tier == "standard"):  # absent Flex is normal
-                logger.warning(
-                    json.dumps(
-                        {"event": "pricing_entry_invalid", "model_id": model_id, "tier": tier}
-                    )
-                )
-                rates = fallback.get(model_id, {}).get(tier)
-            if rates is not None:
+            if tier in value:
+                if (rates := _normalize_rates(value[tier])) is None:
+                    raise ValueError(f"invalid pricing entry for {model_id}: {tier}")
                 tiers[tier] = rates
-        if "standard" in tiers:
-            normalized[model_id] = tiers
+        normalized[model_id] = tiers
     return normalized
 
 
@@ -4791,15 +4780,14 @@ def _load_pricing() -> PricingMap:
         if live is None:
             _PRICING_CACHE = _default_pricing()
         else:
-            normalized = _normalize_pricing_map(live, _default_pricing())
+            normalized = _normalize_pricing_map(live)
             if not normalized:
-                raise ValueError("live catalog has no valid entries")
+                raise ValueError("live catalog is empty")
             _PRICING_CACHE = normalized
         ttl = _PRICING_TTL
     except Exception as exc:
-        # Transient S3, or a corrupt object (unparseable, not a catalog, or no valid entry)
-        # — serve baked-in rates, but re-check soon. A single malformed tier is instead
-        # replaced from DEFAULT_PRICING in _normalize_pricing_map.
+        # Transient S3, or a corrupt object (unparseable, not a catalog, empty, or any
+        # invalid entry) — serve baked-in rates for every model, but re-check soon.
         logger.warning(json.dumps({"event": "pricing_source_unavailable", "error": str(exc)}))
         _PRICING_CACHE = _default_pricing()
         ttl = _PRICING_RETRY_TTL

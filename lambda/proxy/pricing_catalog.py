@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +94,14 @@ _COST_FIELDS = {
     "cache_write_input_usd_micros_per_1k": "cache_creation_input_token_cost",
 }
 _CACHE_RATES = ("cache_read_input_usd_micros_per_1k", "cache_write_input_usd_micros_per_1k")
+_COST_FIELD_NAMES = tuple(
+    field + suffix for field in _COST_FIELDS.values() for suffix in _TIER_SUFFIXES.values()
+)
+
+# Plausible bounds: a positive cost in USD/token ($0.0001 to $1,000 per 1M tokens), and
+# a Flex/Priority cost as a multiple of the matching Standard cost.
+_COST_BOUNDS = (1e-10, 1e-3)
+_TIER_RATIO_BOUNDS = (0.25, 4)
 
 
 def normalize_service_tier(raw: object) -> str:
@@ -132,27 +139,40 @@ def _per_token_to_micros_per_1k(v: float) -> int:
     return round(v * 1e9)
 
 
-_COST_FIELD_NAMES = tuple(
-    field + suffix for field in _COST_FIELDS.values() for suffix in _TIER_SUFFIXES.values()
-)
-
-
-def _is_cost(value: object) -> bool:
-    """A usable litellm per-token cost: a finite, non-negative int or float (not bool)."""
-    return type(value) in (int, float) and math.isfinite(value) and value >= 0
-
-
 def _check_costs(model_id: str, entry: dict) -> None:
-    """Reject corrupt upstream data outright rather than guess a price from it.
+    """Reject corrupt or implausible upstream data outright rather than guess a price.
 
-    Any present cost field that isn't a usable cost (negative, non-finite, bool, string)
-    raises, so a live refresh fails closed — the last good catalog stays in S3 — and
-    gen_pricing exits. Stale prices are recoverable; a wrong price bills real budgets.
+    Raises ValueError on a present cost field that is not a finite, non-negative int or
+    float (bool and string included), a positive cost outside ``_COST_BOUNDS``, a free
+    Standard input with a paid output, or a Flex/Priority cost that differs from the
+    matching Standard cost on zero-ness or by a ratio outside ``_TIER_RATIO_BOUNDS``. A
+    live refresh then fails closed — the last good catalog stays in S3 — and gen_pricing
+    exits. Stale prices are recoverable; a wrong price bills real budgets.
     """
+
+    def corrupt(field: str) -> ValueError:
+        return ValueError(f"corrupt upstream price for {model_id}: {field}={entry[field]!r}")
+
+    lo, hi = _COST_BOUNDS
     for field in _COST_FIELD_NAMES:
         value = entry.get(field)
-        if value is not None and not _is_cost(value):
-            raise ValueError(f"corrupt upstream price for {model_id}: {field}={value!r}")
+        # The range test also rejects negatives, NaN, infinities and huge ints.
+        if value is not None and (
+            type(value) not in (int, float) or not (value == 0 or lo <= value <= hi)
+        ):
+            raise corrupt(field)
+    if entry["input_cost_per_token"] == 0 < entry["output_cost_per_token"]:
+        raise corrupt("input_cost_per_token")
+    lo, hi = _TIER_RATIO_BOUNDS
+    for suffix in (_TIER_SUFFIXES["flex"], _TIER_SUFFIXES["priority"]):
+        for field in _COST_FIELDS.values():
+            tier, std = entry.get(field + suffix), entry.get(field)
+            if (
+                tier is not None
+                and std is not None
+                and ((tier > 0) != (std > 0) or (tier > 0 and not lo <= tier / std <= hi))
+            ):
+                raise corrupt(field + suffix)
 
 
 def _to_rates(
@@ -160,16 +180,15 @@ def _to_rates(
 ) -> dict[str, int] | None:
     """Convert one service tier of a litellm pricing entry to a µUSD rates dict.
 
-    Returns None when the tier's input or output cost is missing. A Flex/Priority tier
-    (``standard``: the already-built Standard rates) is also dropped unless its
-    input and output each match Standard on zero-ness — an upstream ``*_flex: 0`` would
-    otherwise make that tier free, while output-free embeddings keep their tiers.
+    Returns None when the tier's input or output cost is missing. ``standard`` is the
+    already-built Standard rates, needed by a Flex/Priority tier; ``_check_costs`` has
+    already rejected any tier cost that disagrees with Standard.
 
     Cache fallback (D3): Standard defaults a missing cache cost to its output rate. A
-    tier cache cost that is missing, or fails the same zero-ness test against Standard's
-    filled cache rate, becomes that rate scaled by the tier ratio. The ratio comes from
-    the raw input costs (output if Standard input is 0; Pass 1 guarantees one is
-    nonzero) — the tier OUTPUT rate would over-bill cache reads ~32x on nova-2-pro.
+    tier cache cost that is missing, or differs on zero-ness from Standard's filled cache
+    rate, becomes that rate scaled by the tier's raw input ratio (Standard input is
+    nonzero: ``_check_costs`` and Pass 1 reject the alternatives) — the tier OUTPUT rate
+    would over-bill cache reads ~32x on nova-2-pro.
     entry.get(key) returns None for both absent keys and JSON null values.
     """
     suffix = _TIER_SUFFIXES[tier]
@@ -182,10 +201,7 @@ def _to_rates(
             rate: _per_token_to_micros_per_1k(out if cost is None else cost)
             for rate, cost in costs.items()
         }
-    std_in, std_out = entry["input_cost_per_token"], entry["output_cost_per_token"]
-    if (inp > 0) != (std_in > 0) or (out > 0) != (std_out > 0):
-        return None
-    ratio = inp / std_in if std_in else out / std_out
+    ratio = inp / entry["input_cost_per_token"]
     rates = {}
     for rate, cost in costs.items():
         if rate in _CACHE_RATES and (cost is None or (cost > 0) != (standard[rate] > 0)):
@@ -244,13 +260,15 @@ def _build_entries(
     Pass 2b derives base IDs from us.* variants when absent (D5 generalization).
     Neither pass overwrites an explicit vendor entry. Derived IDs inherit every service
     tier of their source (a shallow copy; nothing mutates the catalog).
+
+    Raises ValueError on a corrupt or implausible upstream price (see _check_costs).
     """
     entries: dict[str, dict[str, dict[str, int]]] = {}
     derived_ids: list[str] = []
 
     # Pass 1: emit all vendor entries.
-    # The vendor file filter already enforces the constraints below; the guards
-    # here are a belt-and-suspenders double-check against schema drift.
+    # The vendor file filter already enforces the provider and null-cost guards below;
+    # they recheck against schema drift. _check_costs then rejects corrupt prices.
     for model_id, entry in vendor.items():
         if entry.get("litellm_provider") not in _PRICED_PROVIDERS:
             continue
@@ -274,7 +292,7 @@ def _build_entries(
         # Drop entries with no billing value (both token costs 0) — e.g. rerank
         # models at 0/0. Including them would underbill (route to fallback at $0).
         # Token-priced embeddings (input > 0, output 0) ARE billable and kept.
-        if inp_cost <= 0 and out_cost <= 0:
+        if inp_cost == out_cost == 0:
             continue
         std = _to_rates(entry, "standard")
         entries[model_id] = {"standard": std} | {
@@ -319,6 +337,7 @@ def build_catalog(raw: dict) -> dict[str, dict[str, dict[str, int]]]:
 
     Filters to routeable bedrock-runtime + bedrock-mantle entries (the latter namespaced
     under mantle/, see filter_bedrock) then builds the µUSD per-service-tier map.
-    Same shape as DEFAULT_PRICING in pricing.py.
+    Same shape as DEFAULT_PRICING in pricing.py. Raises ValueError on a corrupt or
+    implausible upstream price, so a refresh never publishes a guessed rate.
     """
     return _build_entries(filter_bedrock(raw))[0]

@@ -217,19 +217,10 @@ def test_tiers_built_from_suffixed_keys():
     [
         {"input_cost_per_token_flex": 5.0e-07},  # output missing
         {"output_cost_per_token_flex": 1.0e-06},  # input missing
-        {"input_cost_per_token_flex": 0, "output_cost_per_token_flex": 1.0e-06},
-        {"input_cost_per_token_flex": 5.0e-07, "output_cost_per_token_flex": 0},
     ],
 )
-def test_tier_dropped_when_missing_or_zero_over_positive_standard(extra):
+def test_tier_dropped_when_input_or_output_missing(extra):
     assert set(_tiers(_tiered(**extra))) == {"standard"}
-
-
-def test_positive_tier_over_zero_standard_drops_tier():
-    entry = _tiered(
-        output_cost_per_token=0, input_cost_per_token_flex=5.0e-07, output_cost_per_token_flex=1e-7
-    )
-    assert "flex" not in _tiers(entry)
 
 
 def test_embedding_keeps_zero_output_tier():
@@ -241,25 +232,15 @@ def test_embedding_keeps_zero_output_tier():
     assert flex["output_usd_micros_per_1k"] == 0
 
 
-def test_zero_standard_input_uses_output_ratio_for_cache_fallback():
+def test_zero_tier_cache_over_filled_standard_cache_uses_scaled_fallback():
+    # Standard's cache is absent, so _check_costs has nothing to compare; the build
+    # compares against the filled (output) rate and scales it instead of billing $0.
     entry = _tiered(
-        input_cost_per_token=0,
-        cache_read_input_token_cost=1.0e-06,
-        input_cost_per_token_flex=0,
-        output_cost_per_token_flex=1.0e-06,
-    )
-    flex = _tiers(entry)["flex"]  # no ZeroDivisionError
-    assert flex["cache_read_input_usd_micros_per_1k"] == 500  # 1000 x (1e-6 / 2e-6)
-
-
-def test_zero_tier_cache_over_positive_standard_cache_uses_scaled_fallback():
-    entry = _tiered(
-        cache_read_input_token_cost=1.0e-07,
         input_cost_per_token_flex=5.0e-07,
         output_cost_per_token_flex=1.0e-06,
         cache_read_input_token_cost_flex=0,
     )
-    assert _tiers(entry)["flex"]["cache_read_input_usd_micros_per_1k"] == 50
+    assert _tiers(entry)["flex"]["cache_read_input_usd_micros_per_1k"] == 1000  # 2000 x 0.5
 
 
 def test_tier_cache_kept_when_standard_cache_absent():
@@ -325,28 +306,46 @@ def test_normalize_service_tier(raw, expected):
     assert normalize_service_tier(raw) == expected
 
 
-def _vendor(**costs) -> dict:
-    return {
-        "amazon.x-v1:0": {
-            "litellm_provider": "bedrock",
-            "input_cost_per_token": 1e-06,
-            "output_cost_per_token": 2e-06,
-            **costs,
-        }
-    }
+_FIELDS = [
+    "input_cost_per_token",
+    "cache_read_input_token_cost",
+    "input_cost_per_token_flex",
+    "cache_creation_input_token_cost_priority",
+]
+
+
+@pytest.mark.parametrize("field", _FIELDS)
+@pytest.mark.parametrize(
+    "bad", [-1e-07, "5e-7", True, float("inf"), float("nan"), 10**400, 3.0, 3e-13]
+)
+def test_corrupt_upstream_cost_fails_the_build(field, bad):
+    """Any corrupt price field rejects the whole build: refresh fails closed, no guessing."""
+    with pytest.raises(ValueError, match=f"openai.m: {field}="):
+        _tiers(_tiered(**{field: bad}))
 
 
 @pytest.mark.parametrize(
-    "field",
+    ("extra", "field"),
     [
-        "input_cost_per_token",
-        "cache_read_input_token_cost",
-        "input_cost_per_token_flex",
-        "cache_creation_input_token_cost_priority",
+        ({"input_cost_per_token_flex": 1.5e-12}, "input_cost_per_token_flex"),  # below bound
+        ({"input_cost_per_token_priority": 1.0e-03}, "input_cost_per_token_priority"),  # 1000x
+        ({"input_cost_per_token_flex": 1.0e-07}, "input_cost_per_token_flex"),  # 0.1x
+        ({"input_cost_per_token": 0}, "input_cost_per_token"),  # free input, paid output
+        # Tier zero-ness disagrees with Standard (either way round).
+        ({"input_cost_per_token_flex": 0}, "input_cost_per_token_flex"),
+        ({"output_cost_per_token_flex": 0}, "output_cost_per_token_flex"),
+        (
+            {"output_cost_per_token": 0, "output_cost_per_token_flex": 1.0e-07},
+            "output_cost_per_token_flex",
+        ),
+        (
+            {"cache_read_input_token_cost": 1.0e-07, "cache_read_input_token_cost_flex": 0},
+            "cache_read_input_token_cost_flex",
+        ),
     ],
 )
-@pytest.mark.parametrize("bad", [-1e-07, "5e-7", True, float("inf"), float("nan")])
-def test_corrupt_upstream_cost_fails_the_build(field, bad):
-    """Any corrupt price field rejects the whole build: refresh fails closed, no guessing."""
-    with pytest.raises(ValueError, match=f"amazon.x-v1:0: {field}"):
-        _build_entries(_vendor(**{field: bad}))
+def test_implausible_upstream_cost_fails_the_build(extra, field):
+    entry = _tiered(input_cost_per_token_flex=5.0e-07, output_cost_per_token_flex=1.0e-06)
+    entry.update(input_cost_per_token_priority=2.0e-06, output_cost_per_token_priority=4.0e-06)
+    with pytest.raises(ValueError, match=f"openai.m: {field}="):
+        _tiers(entry | extra)
