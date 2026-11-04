@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +132,27 @@ def _per_token_to_micros_per_1k(v: float) -> int:
     return round(v * 1e9)
 
 
+_COST_FIELD_NAMES = tuple(
+    field + suffix for field in _COST_FIELDS.values() for suffix in _TIER_SUFFIXES.values()
+)
+
+
 def _is_cost(value: object) -> bool:
-    """A usable litellm per-token cost: a non-negative int or float (not bool)."""
-    return type(value) in (int, float) and value >= 0
+    """A usable litellm per-token cost: a finite, non-negative int or float (not bool)."""
+    return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+
+def _check_costs(model_id: str, entry: dict) -> None:
+    """Reject corrupt upstream data outright rather than guess a price from it.
+
+    Any present cost field that isn't a usable cost (negative, non-finite, bool, string)
+    raises, so a live refresh fails closed — the last good catalog stays in S3 — and
+    gen_pricing exits. Stale prices are recoverable; a wrong price bills real budgets.
+    """
+    for field in _COST_FIELD_NAMES:
+        value = entry.get(field)
+        if value is not None and not _is_cost(value):
+            raise ValueError(f"corrupt upstream price for {model_id}: {field}={value!r}")
 
 
 def _to_rates(
@@ -155,17 +174,8 @@ def _to_rates(
     """
     suffix = _TIER_SUFFIXES[tier]
     costs = {rate: entry.get(field + suffix) for rate, field in _COST_FIELDS.items()}
-    # A corrupt cache cost is treated as missing (it takes the fallback below). A corrupt
-    # Flex/Priority input/output drops just that tier, so one bad field can't fail a refresh.
-    # Standard input/output pass through as-is: a negative one is rejected at runtime, where
-    # the baked-in rate can replace it (dropping the model here would bill the Opus fallback).
-    for rate in _CACHE_RATES:
-        if not _is_cost(costs[rate]):
-            costs[rate] = None
     inp, out = costs["input_usd_micros_per_1k"], costs["output_usd_micros_per_1k"]
     if inp is None or out is None:
-        return None
-    if tier != "standard" and not (_is_cost(inp) and _is_cost(out)):
         return None
     if tier == "standard":
         return {
@@ -248,6 +258,7 @@ def _build_entries(
         out_cost = entry.get("output_cost_per_token")
         if inp_cost is None or out_cost is None:
             continue
+        _check_costs(model_id, entry)
         # Upstream started pricing reasoning separately for this model — our rates no
         # longer capture its full cost. Warn (do not drop: the fallback is far worse).
         if entry.get(_REASONING_COST_FIELD) is not None:

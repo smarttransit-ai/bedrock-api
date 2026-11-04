@@ -322,20 +322,24 @@ def test_invalid_live_tier_is_replaced_from_default_pricing(pricing_bucket, tier
     assert fallback_applied is False
 
 
-def test_non_dict_live_model_recovers_every_baked_in_tier(pricing_bucket):
+def test_non_dict_live_model_recovers_every_baked_in_tier(pricing_bucket, caplog):
     from pricing import DEFAULT_PRICING
 
     mid = "openai.gpt-oss-120b-1:0"
-    _set_live(
-        {
-            mid: None,
-            "c.model": {"standard": {"input_usd_micros_per_1k": 1, "output_usd_micros_per_1k": 1}},
-        }
-    )
-    for tier in ("standard", "flex"):
-        cost, _, fallback_applied, _, _ = compute_cost(mid, tier, 1000, 0, 0, 0)
-        assert cost == DEFAULT_PRICING[mid][tier]["input_usd_micros_per_1k"]
-        assert fallback_applied is False
+    std = {"input_usd_micros_per_1k": 1, "output_usd_micros_per_1k": 1}
+    _set_live({mid: None, "x.model": None, "c.model": {"standard": std}})
+    with caplog.at_level(logging.WARNING):
+        for tier in ("standard", "flex"):
+            cost, _, fallback_applied, _, _ = compute_cost(mid, tier, 1000, 0, 0, 0)
+            assert cost == DEFAULT_PRICING[mid][tier]["input_usd_micros_per_1k"]
+            assert fallback_applied is False
+        assert compute_cost("x.model", "standard", 1, 0, 0, 0)[3] == ["model_id"]  # dropped
+    invalid = {
+        (e["model_id"], e["tier"])
+        for e in (json.loads(r.message) for r in caplog.records)
+        if e.get("event") == "pricing_entry_invalid"
+    }
+    assert invalid == {(mid, t) for t in DEFAULT_PRICING[mid]} | {("x.model", "standard")}
 
 
 def test_live_catalog_with_no_valid_entry_falls_back_with_short_retry(pricing_bucket):

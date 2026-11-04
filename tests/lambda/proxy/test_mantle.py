@@ -313,6 +313,25 @@ def test_stream_terminal_event_without_usage_leaves_no_token_keys():
     assert usage_out == {"service_tier": "standard", "terminal_event": "response.failed"}
 
 
+@pytest.mark.parametrize("response", ["x", {"usage": "x"}, {"usage": ["x"]}])
+def test_stream_malformed_terminal_response_leaves_no_token_keys(response):
+    resp = open_responses_stream(
+        _client(_sse(_terminal("response.completed", response))),
+        "openai.gpt-oss-120b",
+        {"input": "hi"},
+    )
+    usage_out: dict = {}
+    lines = list(iter_responses_sse(resp, usage_out))
+    assert any(line.startswith("data: ") for line in lines)  # still relayed
+    assert usage_out == {"service_tier": "standard", "terminal_event": "response.completed"}
+
+
+def test_forward_responses_without_usage_warns(caplog):
+    with caplog.at_level("WARNING"):
+        forward_responses(_client(_ok({"output": []})), "openai.gpt-oss-120b", {"input": "hi"})
+    assert any("usage_parse_warning" in r.message for r in caplog.records)
+
+
 def test_stream_sets_stream_true_in_body():
     seen = {}
 

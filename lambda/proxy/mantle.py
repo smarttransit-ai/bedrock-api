@@ -97,7 +97,7 @@ def _flatten_usage(usage: dict | None) -> dict:
     Converse key-map contract untouched — one call site absorbs the shape difference.
     """
     if not isinstance(usage, dict):
-        return {}
+        return usage  # normalize_usage logs usage_parse_warning for a non-dict
     flat = dict(usage)
     for detail_key in ("input_tokens_details", "output_tokens_details"):
         details = usage.get(detail_key)
@@ -232,7 +232,7 @@ def iter_responses_sse(resp, usage_out: dict) -> Generator[str, None, None]:
                 usage_out["service_tier"] = normalize_service_tier(response.get("service_tier"))
                 usage_out["terminal_event"] = payload["type"]
                 usage = response.get("usage")
-                if usage:
+                if isinstance(usage, dict):
                     usage_out.update(
                         _to_exclusive_input(normalize_usage(_flatten_usage(usage), USAGE_KEY_MAP))
                     )

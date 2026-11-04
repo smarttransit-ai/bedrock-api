@@ -130,7 +130,9 @@ kept only when its input and output costs are present and each matches Standard 
 zero-ness (so an upstream `*_flex: 0` cannot make a model free). A missing Standard cache
 cost defaults to the output rate; a missing or zero-mismatched tier cache cost becomes
 Standard's cache rate scaled by the tier's input-cost ratio (output-cost ratio when
-Standard input is 0). When reading the live catalog, a malformed tier (not an object, missing
+Standard input is 0). Any corrupt upstream price field (negative, non-finite, bool or
+string) rejects the whole build, so a refresh fails closed and the last good catalog stays
+live. When reading the live catalog, a malformed tier (not an object, missing
 its input or output rate, or any rate that isn't a non-negative integer) is logged as
 `pricing_entry_invalid` and replaced by the baked-in `DEFAULT_PRICING` rate for that model
 and tier; with no baked-in rate it is dropped, and so is the whole model when that leaves no

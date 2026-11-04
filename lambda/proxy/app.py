@@ -393,11 +393,7 @@ def _bill(usage: dict, pf: PreflightResult, log_ctx: dict, *, completed: bool = 
 
 def _tier_headers(raw_service_tier: str | None) -> dict[str, str] | None:
     """Echo Bedrock's own reported tier, so a boto3 client fills its serviceTier output."""
-    return (
-        {TIER_HEADER: raw_service_tier}
-        if isinstance(raw_service_tier, str) and raw_service_tier
-        else None
-    )
+    return {TIER_HEADER: raw_service_tier} if raw_service_tier else None
 
 
 async def _run_nonstreaming(
