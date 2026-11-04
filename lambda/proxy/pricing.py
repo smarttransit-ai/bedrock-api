@@ -1,5 +1,4 @@
 # ruff: noqa: E501
-import functools
 import json
 import logging
 import os
@@ -4705,68 +4704,33 @@ _PRICING_TTL: float = float(os.environ.get("PRICING_CACHE_TTL_S", "60"))
 _PRICING_RETRY_TTL: float = 5.0
 
 
-def _rate(value: object) -> int:
-    """A catalog rate: a non-negative int. Anything else (bool, float, str, negative) is unusable."""
-    if type(value) is not int or value < 0:
-        raise ValueError(f"invalid rate {value!r}")
-    return value
-
-
-def _normalize_rates(rates: object) -> PricingRates:
-    """Return int rates with cache rates defaulted to output; raise ValueError if unusable.
-
-    Unusable means not a dict, missing input/output, or any rate that isn't a non-negative
-    int — a negative rate would credit budgets back.
-    """
-    if not isinstance(rates, dict):
-        raise ValueError("not an object")
-    try:
-        input_rate = _rate(rates["input_usd_micros_per_1k"])
-        output_rate = _rate(rates["output_usd_micros_per_1k"])
-    except KeyError as exc:
-        raise ValueError(f"missing {exc.args[0]}") from exc
+def _normalize_rates(rates: dict) -> PricingRates:
+    output_rate = int(
+        rates.get("output_usd_micros_per_1k", _FALLBACK_RATES["output_usd_micros_per_1k"])
+    )
     return {
-        "input_usd_micros_per_1k": input_rate,
+        "input_usd_micros_per_1k": int(
+            rates.get("input_usd_micros_per_1k", _FALLBACK_RATES["input_usd_micros_per_1k"])
+        ),
         "output_usd_micros_per_1k": output_rate,
-        "cache_read_input_usd_micros_per_1k": _rate(
+        "cache_read_input_usd_micros_per_1k": int(
             rates.get("cache_read_input_usd_micros_per_1k", output_rate)
         ),
-        "cache_write_input_usd_micros_per_1k": _rate(
+        "cache_write_input_usd_micros_per_1k": int(
             rates.get("cache_write_input_usd_micros_per_1k", output_rate)
         ),
     }
 
 
 def _normalize_pricing_map(raw_map: dict) -> PricingMap:
-    """Normalize every model's service tiers; raise ValueError on any corrupt entry.
-
-    Corrupt means a model that isn't an object, has no ``standard`` tier, or carries a
-    present-but-invalid tier (absent Flex/Priority is normal). One bad entry condemns the
-    whole object: a live catalog that corrupt is not trusted for any model.
+    """Normalize each model's service tiers; skip a model with no ``standard`` tier, so it
+    bills as an unknown model (_FALLBACK_RATES) instead of failing to resolve.
     """
-    normalized: PricingMap = {}
-    for model_id, value in raw_map.items():
-        if not isinstance(value, dict):
-            raise ValueError(f"invalid pricing entry for {model_id}: not an object")
-        if "standard" not in value:
-            raise ValueError(f"invalid pricing entry for {model_id}: standard")
-        tiers: PricingTierMap = {}
-        for tier in SERVICE_TIERS:
-            if tier in value:
-                try:
-                    tiers[tier] = _normalize_rates(value[tier])
-                except ValueError as exc:
-                    raise ValueError(
-                        f"invalid pricing entry for {model_id}: {tier}: {exc}"
-                    ) from exc
-        normalized[model_id] = tiers
-    return normalized
-
-
-@functools.cache
-def _default_pricing() -> PricingMap:
-    """DEFAULT_PRICING, normalized once per process."""
-    return _normalize_pricing_map(DEFAULT_PRICING)
+    return {
+        model_id: {tier: _normalize_rates(value[tier]) for tier in SERVICE_TIERS if tier in value}
+        for model_id, value in raw_map.items()
+        if isinstance(value, dict) and "standard" in value
+    }
 
 
 def _load_pricing() -> PricingMap:
@@ -4780,19 +4744,12 @@ def _load_pricing() -> PricingMap:
         return _PRICING_CACHE
     try:
         live = load_live_catalog(get_s3())
-        if live is None:
-            _PRICING_CACHE = _default_pricing()
-        else:
-            normalized = _normalize_pricing_map(live)
-            if not normalized:
-                raise ValueError("live catalog is empty")
-            _PRICING_CACHE = normalized
+        _PRICING_CACHE = _normalize_pricing_map(live if live is not None else DEFAULT_PRICING)
         ttl = _PRICING_TTL
     except Exception as exc:
-        # Transient S3, or a corrupt object (unparseable, not a catalog, empty, or any
-        # invalid entry) — serve baked-in rates for every model, but re-check soon.
+        # Transient/corrupt S3 — serve baked-in rates, but re-check soon.
         logger.warning(json.dumps({"event": "pricing_source_unavailable", "error": str(exc)}))
-        _PRICING_CACHE = _default_pricing()
+        _PRICING_CACHE = _normalize_pricing_map(DEFAULT_PRICING)
         ttl = _PRICING_RETRY_TTL
     _PRICING_CACHE_AT = time.monotonic()
     _PRICING_CACHE_TTL = ttl

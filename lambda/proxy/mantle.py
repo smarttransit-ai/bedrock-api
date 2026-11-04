@@ -41,10 +41,9 @@ _ERROR_STATUS = {
 }
 _DEFAULT_ERROR = ("BEDROCK_ERROR", 502)
 
-# Every terminal Responses stream event: each carries the final response, and its usage when
-# tokens were consumed — a stream cut by the proxy's own max_output_tokens cap ends
-# ``response.incomplete`` with usage, and must still bill.
-_TERMINAL_EVENTS = frozenset({"response.completed", "response.incomplete", "response.failed"})
+# Terminal Responses stream events. Each carries the final response, with usage when tokens
+# were consumed: a stream cut by the proxy's own max_output_tokens cap ends incomplete.
+_TERMINAL_EVENTS = ("response.completed", "response.incomplete", "response.failed")
 
 
 def sign_headers(client, body: bytes, path: str = RESPONSES_PATH) -> dict[str, str]:
@@ -84,7 +83,7 @@ def _raise_mantle_error(status: int, payload: dict | None) -> None:
     raise BedrockError(code, message, mapped_status)
 
 
-def _flatten_usage(usage: object) -> dict:
+def _flatten_usage(usage: dict | None) -> dict:
     """Flatten the Responses usage shape so normalize_usage (flat reader) can read it.
 
     Responses nests cache counters one level down:
@@ -97,7 +96,7 @@ def _flatten_usage(usage: object) -> dict:
     Converse key-map contract untouched — one call site absorbs the shape difference.
     """
     if not isinstance(usage, dict):
-        return {}  # normalize_usage flags it usage_missing
+        return {}
     flat = dict(usage)
     for detail_key in ("input_tokens_details", "output_tokens_details"):
         details = usage.get(detail_key)
@@ -121,7 +120,7 @@ USAGE_KEY_MAP = {
 }
 
 
-def _to_exclusive_input(usage: dict[str, int | bool]) -> dict[str, int | bool]:
+def _to_exclusive_input(usage: dict[str, int]) -> dict[str, int]:
     """Make input_tokens exclusive of the cache counters, as Converse already reports it.
 
     The two upstreams disagree, and compute_cost only works for one of them:
@@ -150,21 +149,17 @@ def _to_exclusive_input(usage: dict[str, int | bool]) -> dict[str, int | bool]:
     return usage
 
 
-def reasoning_tokens_of(usage: object) -> int:
+def reasoning_tokens_of(usage: dict | None) -> int:
     """Reasoning-token count for logging only (never a billing dimension — see USAGE_KEY_MAP)."""
-    details = usage.get("output_tokens_details") if isinstance(usage, dict) else None
+    details = (usage or {}).get("output_tokens_details")
     value = details.get("reasoning_tokens") if isinstance(details, dict) else 0
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def forward_responses(
-    client, model_id: str, body: dict
-) -> tuple[dict, dict[str, int | str | bool]]:
+def forward_responses(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str]]:
     """POST /openai/v1/responses (non-streaming); return (response_body, normalized_usage).
 
-    Mirrors bedrock.forward_converse's contract so the shared route body is unchanged. The
-    usage dict also carries the reported ``service_tier`` (``default``/``auto`` mean
-    Standard) and ``reasoning_tokens`` (logged, never billed).
+    Mirrors bedrock.forward_converse's contract so the shared route body is unchanged.
     """
     payload = json.dumps({**body, "model": model_id, "stream": False}).encode()
     try:
@@ -217,31 +212,25 @@ def iter_responses_sse(resp, usage_out: dict) -> Generator[str, None, None]:
     dispatch on that type — reformatting through a data-only emitter would strip the event
     types and break compliant SDKs. Verbatim relay is also cheaper: no parse/reserialize.
 
-    Usage and the service tier arrive on the terminal event (any of _TERMINAL_EVENTS, under
-    ``data.response``); its type is recorded as ``terminal_event``. A terminal event without
-    usage (e.g. a ``response.failed`` before any tokens) leaves no token keys, so nothing
-    bills, and sets ``usage_missing`` so _bill logs it.
+    Usage and the service tier arrive on any of _TERMINAL_EVENTS (``data.response``); its
+    type is recorded as ``terminal_event``.
     Closing the response here is mandatory: unlike boto3's GC-managed EventStream, an httpx
     streaming response holds its connection until explicitly closed.
     """
     try:
         for line in resp.iter_lines():
-            # Harvest BEFORE relaying: a client that disconnects right after the terminal
-            # event closes this generator at the yield, and its usage must already be read.
+            # Harvest before relaying: a client that disconnects after the terminal event
+            # closes this generator at the yield.
             payload = _safe_json(line[len("data:") :].strip()) if line.startswith("data:") else None
-            if payload and isinstance(t := payload.get("type"), str) and t in _TERMINAL_EVENTS:
-                response = payload.get("response")
-                response = response if isinstance(response, dict) else {}
+            if payload and payload.get("type") in _TERMINAL_EVENTS:
+                response = payload.get("response") or {}
                 usage_out["service_tier"] = normalize_service_tier(response.get("service_tier"))
-                usage_out["terminal_event"] = t
-                usage = response.get("usage")
-                if isinstance(usage, dict):
+                usage_out["terminal_event"] = payload["type"]
+                if usage := response.get("usage"):
                     usage_out.update(
                         _to_exclusive_input(normalize_usage(_flatten_usage(usage), USAGE_KEY_MAP))
                     )
                     usage_out["reasoning_tokens"] = reasoning_tokens_of(usage)
-                else:
-                    usage_out["usage_missing"] = True
             yield f"{line}\n"
     finally:
         resp.close()

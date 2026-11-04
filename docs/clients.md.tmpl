@@ -249,26 +249,20 @@ charged twice. `GET /usage` reports them within your output-token total.
 
 ## Service tiers
 
-Bedrock runs each request at a service tier: **Standard** (the default), **Flex** (about
-half the Standard price, for work that can wait) or **Priority** (about 1.75x, for
-latency-sensitive work). Ask for one per request:
+Bedrock runs each request at a service tier: **Standard** (default), **Flex** (about half
+price, for work that can wait) or **Priority** (about 1.75x). To request Flex (or `priority`):
 
-| Route | How to request Flex |
+| Route | How |
 |---|---|
 | `converse`, `converse-stream` | `"serviceTier": {"type": "flex"}` in the body |
-| `invoke`, `invoke-with-response-stream` | header `X-Amzn-Bedrock-Service-Tier: flex` (boto3 sends it for `serviceTier="flex"`) |
+| `invoke`, `invoke-with-response-stream` | header `X-Amzn-Bedrock-Service-Tier: flex` (boto3: `serviceTier="flex"`) |
 | `/openai/v1/responses` | `"service_tier": "flex"` in the body |
 
-Use `priority` the same way. **You are billed at the tier AWS reports the request ran on**,
-not the one you asked for. Converse and Responses report it in the response body;
-non-streaming `invoke` echoes it in the `X-Amzn-Bedrock-Service-Tier` response header, so
-boto3's `invoke_model` fills `serviceTier` in its response as usual.
-`invoke-with-response-stream` does not report the tier back, but billing still follows it.
-
-Not every model offers every tier. Claude models reject Flex — the Bedrock routes return
-`502 BEDROCK_ERROR` ("service tier is not supported") — and `openai.gpt-5.6-luna` rejects it
-on the Responses route with `400 BAD_REQUEST`. Open-weight models (e.g.
-`openai.gpt-oss-120b-1:0`) and Amazon Nova accept it.
+**You are billed at the tier AWS reports the request ran on**; non-streaming `invoke` echoes
+it in the `X-Amzn-Bedrock-Service-Tier` response header. Not every model offers every
+tier: Claude rejects Flex (`502 BEDROCK_ERROR`) and `openai.gpt-5.6-luna` rejects it on
+Responses (`400 BAD_REQUEST`); open-weight models such as `openai.gpt-oss-120b-1:0` and
+Amazon Nova accept it.
 
 ---
 

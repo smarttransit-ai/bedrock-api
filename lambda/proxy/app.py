@@ -307,43 +307,23 @@ async def health():
 _LOGGED_EXTRAS = ("reasoning_tokens", "terminal_event")
 
 
-def _bill(usage: dict, pf: PreflightResult, log_ctx: dict, *, completed: bool = True) -> None:
+def _bill(usage: dict, pf: PreflightResult, log_ctx: dict) -> None:
     """Bill a finished call and emit its audit logs. Never raises — errors are logged only.
 
-    The single billing tail for every route, streaming and non-streaming — they differ only
-    in transport, so billing and observability stay single-sourced. ``usage`` is read-only.
-
-    An extractor flags ``usage_missing`` when the upstream reported no input count; that is
-    logged once here as ``usage_parse_warning`` (with ``model_id``), then billing proceeds.
-
-    Token gate: when no TOKEN_KEYS were reported (a client disconnect, or a usage-less
-    ``response.failed``) nothing is written. If the call ran to ``completed`` anyway, that
-    is logged as ``usage_parse_warning`` (unless already flagged), so no request ends at $0
-    without a log line. A partial stream bills the counters it did receive. The tier billed
-    is the one the upstream reported (``service_tier``), Standard when it reported none.
-
-    Observability:
-      - compute_cost failure → logs ``billing_failed`` and returns early
-      - pricing_audit always emitted after a successful compute
-      - write_usage failure → logs ``usage_write_failed`` (does not suppress request_complete)
-      - request_complete always emitted once billed
+    The single billing tail for every route. ``usage`` is read-only. With no token counters
+    (a client disconnect, a usage-less ``response.failed``) nothing is written. The tier billed
+    is the one the upstream reported, Standard when it reported none.
 
     Billing keys off pf.pricing_model_id, never pf.model_id: on the responses route the
     catalog key is namespaced (mantle/<id>) and the bare wire ID would miss the catalog,
     silently charging the Opus-tier fallback.
     """
-    log_ctx.update({k: usage[k] for k in _LOGGED_EXTRAS if k in usage})
-    has_tokens = any(k in usage for k in TOKEN_KEYS)
-    if usage.get("usage_missing"):
-        logger.warning(json.dumps({**log_ctx, "event": "usage_parse_warning", "field": "usage"}))
-    elif completed and not has_tokens:
-        logger.warning(json.dumps({**log_ctx, "event": "usage_parse_warning"}))
-    if not has_tokens:
+    if not any(k in usage for k in TOKEN_KEYS):
         return
-
     counts = {k: usage.get(k, 0) for k in TOKEN_KEYS}
     tier = usage.get("service_tier", "standard")
     log_ctx.update(counts, service_tier=tier)
+    log_ctx.update({k: usage[k] for k in _LOGGED_EXTRAS if k in usage})
 
     # The upstream call already succeeded and consumed tokens, so a billing failure must not
     # turn into a 500 that tells the caller to retry — log it; the caller still responds.
@@ -397,11 +377,6 @@ def _bill(usage: dict, pf: PreflightResult, log_ctx: dict, *, completed: bool = 
     )
 
 
-def _tier_headers(raw_service_tier: str | None) -> dict[str, str] | None:
-    """Echo Bedrock's own reported tier, so a boto3 client fills its serviceTier output."""
-    return {TIER_HEADER: raw_service_tier} if raw_service_tier else None
-
-
 async def _run_nonstreaming(
     model_id: str,
     request: Request,
@@ -436,7 +411,9 @@ async def _run_nonstreaming(
         # route, where preflight resolves the model from the body.
         upstream_resp, usage = forward_fn(bedrock_client, pf.model_id, body)
         _bill(usage, pf, log_ctx)
-        return JSONResponse(upstream_resp, headers=_tier_headers(usage.get("raw_service_tier")))
+        # Echo Bedrock's reported tier, so a boto3 client fills its serviceTier output.
+        tier = usage.get("raw_service_tier")
+        return JSONResponse(upstream_resp, headers={TIER_HEADER: tier} if tier else None)
 
     except (AuthError, LimitError, BedrockError) as exc:
         return _handle_known_error(exc, log_ctx, start_ms)
@@ -468,10 +445,7 @@ async def invoke(
     tables=Depends(get_tables),
     bedrock_client=Depends(get_bedrock),
 ):
-    """POST /model/{model_id}/invoke — non-streaming InvokeModel API proxy.
-
-    Forwards the client's service-tier header (the one boto3 sends for serviceTier).
-    """
+    """POST /model/{model_id}/invoke — non-streaming InvokeModel API proxy."""
     forward_fn = partial(forward_invoke_model, service_tier=request.headers.get(TIER_HEADER))
     return await _run_nonstreaming(
         model_id, request, tables, bedrock_client, ROUTE_INVOKE, forward_fn
@@ -635,9 +609,7 @@ def _sse_stream(event_iter, usage_out: dict, pf: PreflightResult, log_ctx: dict)
 
     Factored out of the route _stream() closures (R6) so test code can drive
     the generator directly — partially iterate, call gen.close(), and assert
-    _bill behaviour without going through HTTP. ``completed`` is set only once
-    the iterator is exhausted, so a disconnect or stream error stays silent in
-    _bill's token gate (errors already log ``stream_error``).
+    _bill behaviour without going through HTTP.
 
     Used by both converse-stream and invoke-with-response-stream routes.  The
     caller is responsible for building the correct event_iter (iter_converse_stream
@@ -649,11 +621,9 @@ def _sse_stream(event_iter, usage_out: dict, pf: PreflightResult, log_ctx: dict)
     R4: generic except uses logger.exception so mid-stream production errors
     carry a traceback (parity with non-streaming routes).
     """
-    completed = False
     try:
         for event in event_iter:
             yield f"data: {json.dumps(event, default=_sse_json_default)}\n\n"
-        completed = True
     except BedrockError as exc:
         # Mid-stream Bedrock error after a 200 + headers were already sent. Log a
         # terminal event for observability parity with the non-streaming reject
@@ -673,7 +643,7 @@ def _sse_stream(event_iter, usage_out: dict, pf: PreflightResult, log_ctx: dict)
             + "\n\n"
         )
     finally:
-        _bill(usage_out, pf, log_ctx, completed=completed)
+        _bill(usage_out, pf, log_ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -726,8 +696,7 @@ async def _run_streaming(
         return _error_json(500, "INTERNAL_ERROR", "Internal server error")
 
     # SSE generator — runs after headers are sent; errors yield terminal frame.
-    # Seeded with the response's tier (invoke-stream); converse-stream's metadata event
-    # overwrites it, and _bill's token gate ignores a tier-only dict.
+    # Seeded with the invoke-stream response's tier; converse-stream's metadata overwrites it.
     usage_out = {"service_tier": normalize_service_tier(response.get("serviceTier"))}
 
     return StreamingResponse(
@@ -764,10 +733,7 @@ async def invoke_with_response_stream(
     tables=Depends(get_tables),
     bedrock_client=Depends(get_bedrock),
 ):
-    """POST /model/{model_id}/invoke-with-response-stream — streaming InvokeModel proxy.
-
-    Forwards the client's service-tier header (the one boto3 sends for serviceTier).
-    """
+    """POST /model/{model_id}/invoke-with-response-stream — streaming InvokeModel proxy."""
     open_fn = partial(open_invoke_stream, service_tier=request.headers.get(TIER_HEADER))
     return await _run_streaming(
         model_id,
@@ -792,16 +758,14 @@ def _mantle_sse_relay(resp, usage_out: dict, pf: PreflightResult, log_ctx: dict)
     Deliberately NOT _sse_stream: that emitter re-serializes parsed events as data-only
     frames, which would strip the ``event: <type>`` lines the Responses stream pairs with
     each ``data:`` line and that OpenAI clients dispatch on. Here the upstream bytes pass
-    through untouched and only the terminal event is inspected, for usage.
+    through untouched and only the terminal events are inspected, for usage and tier.
 
     Unlike _sse_stream there is no BedrockError branch: the Bedrock event stream signals
     mid-stream failures as errors members (bedrock._check_eventstream_error raises), while
     mantle reports them as ordinary SSE ``error`` frames that relay through untouched.
     """
-    completed = False
     try:
         yield from iter_responses_sse(resp, usage_out)
-        completed = True
     except Exception as exc:
         logger.exception(json.dumps({**log_ctx, "event": "stream_error", "error": str(exc)}))
         yield (
@@ -810,7 +774,7 @@ def _mantle_sse_relay(resp, usage_out: dict, pf: PreflightResult, log_ctx: dict)
             + "\n\n"
         )
     finally:
-        _bill(usage_out, pf, log_ctx, completed=completed)
+        _bill(usage_out, pf, log_ctx)
 
 
 @app.post("/openai/v1/responses")
@@ -848,7 +812,7 @@ async def responses(
         if not streaming:
             upstream_resp, usage = forward_responses(mantle_client, pf.model_id, body)
             _bill(usage, pf, log_ctx)
-            return JSONResponse(upstream_resp)  # the tier is in the body: nothing to echo
+            return JSONResponse(upstream_resp)
 
         # B1 parity: open eagerly so upstream 4xx/5xx surface before StreamingResponse.
         resp = open_responses_stream(mantle_client, pf.model_id, body)

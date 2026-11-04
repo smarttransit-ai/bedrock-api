@@ -124,14 +124,9 @@ miss the catalog and charge the Opus-tier fallback (~11x) with nothing failing l
 Reasoning tokens (`output_tokens_details.reasoning_tokens`) are a **subset** of
 `output_tokens`, not an additive dimension: they are logged, never billed separately.
 
-**Each request bills at the service tier the response reports** — Standard, Flex or
-Priority — never the tier the client asked for, since AWS may serve a different one
-(Responses `auto`, for one). Converse reports it in `serviceTier.type`, converse-stream in
-its `metadata` event, InvokeModel (and its stream) in the top-level `serviceTier`, and
-Responses in `service_tier`; absent, `default` or `auto` mean Standard. The catalog keys
-rates by tier (`{"standard", "flex"?, "priority"?}`), taken from litellm's `*_flex` /
-`*_priority` fields. A model without a rate for the tier — including commitment-priced
-Reserved — bills its own Standard rate and logs `pricing_fallback_rate`.
+**Each request bills at the service tier the response reports** (Standard, Flex or
+Priority), not the one requested. The catalog keys rates by tier from litellm's `*_flex` /
+`*_priority` fields; a model without a rate for the tier bills its Standard rate.
 
 ---
 
@@ -220,7 +215,6 @@ graph LR
         F3["bedrock-api-service-tier-standard-count<br/>→ ServiceTierStandardCount"]
         F4["bedrock-api-service-tier-flex-count<br/>→ ServiceTierFlexCount"]
         F5["bedrock-api-service-tier-priority-count<br/>→ ServiceTierPriorityCount"]
-        F6["bedrock-api-service-tier-reserved-count<br/>→ ServiceTierReservedCount"]
     end
 
     Alarm["Alarm: bedrock-api-pricing-fallback-high<br/>fires when fallbacks &gt; max(1% of requests, 100)<br/>in any 15-minute window"]
@@ -230,7 +224,6 @@ graph LR
     Logs --> F3
     Logs --> F4
     Logs --> F5
-    Logs --> F6
     F1 --> Alarm
     F2 --> Alarm
 ```

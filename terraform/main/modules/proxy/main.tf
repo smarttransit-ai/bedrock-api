@@ -80,10 +80,9 @@ resource "aws_cloudwatch_log_metric_filter" "request_complete_count" {
   }
 }
 
-# Billed requests per Bedrock service tier (the tier the response reported). Mirrors
-# pricing_catalog.SERVICE_TIERS, plus "reserved" — a live tier with no per-token rate.
+# Billed requests per Bedrock service tier (pricing_catalog.SERVICE_TIERS).
 resource "aws_cloudwatch_log_metric_filter" "service_tier_count" {
-  for_each       = toset(["standard", "flex", "priority", "reserved"])
+  for_each       = toset(["standard", "flex", "priority"])
   name           = "${var.name_prefix}-service-tier-${each.key}-count"
   log_group_name = aws_cloudwatch_log_group.lambda.name
   pattern        = "{ $.event = \"pricing_audit\" && $.service_tier = \"${each.key}\" }"

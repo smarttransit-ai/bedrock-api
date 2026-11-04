@@ -1,10 +1,8 @@
 import json
-import logging
 import os
 
 import boto3
 import pricing
-import pytest
 from pricing import compute_cost
 from pricing_store import PRICING_OBJECT_KEY, save_live_catalog
 
@@ -57,21 +55,18 @@ _STANDARD = {"input_usd_micros_per_1k": 1000, "output_usd_micros_per_1k": 2000}
 _FLEX = {"input_usd_micros_per_1k": 500, "output_usd_micros_per_1k": 1000}
 
 
-@pytest.mark.parametrize(("tier", "expected"), [("standard", 3000), ("flex", 1500)])
-def test_compute_cost_per_tier(pricing_bucket, tier, expected):
+def test_compute_cost_bills_the_reported_tier(pricing_bucket):
     _set_live({"m": {"standard": _STANDARD, "flex": _FLEX}})
-    total, _, fallback_applied, fallback_dimensions, _ = compute_cost("m", tier, 1000, 1000, 0, 0)
-    assert total == expected
+    total, _, fallback_applied, _, _ = compute_cost("m", "flex", 1000, 1000, 0, 0)
+    assert total == 1500
     assert fallback_applied is False
-    assert fallback_dimensions == []
 
 
-@pytest.mark.parametrize("tier", ["priority", "reserved"])
-def test_missing_tier_falls_back_to_model_standard(pricing_bucket, caplog, tier):
+def test_missing_tier_falls_back_to_model_standard(pricing_bucket, caplog):
     _set_live({"m": {"standard": _STANDARD, "flex": _FLEX}})
     with caplog.at_level("WARNING"):
         total, _, fallback_applied, fallback_dimensions, _ = compute_cost(
-            "m", tier, 1000, 1000, 0, 0
+            "m", "reserved", 1000, 1000, 0, 0
         )
     assert total == 3000  # the model's Standard rate, not the Opus-tier fallback
     assert fallback_applied is True
@@ -80,58 +75,30 @@ def test_missing_tier_falls_back_to_model_standard(pricing_bucket, caplog, tier)
     assert warning == {
         "event": "pricing_fallback_rate",
         "model_id": "m",
-        "service_tier": tier,
+        "service_tier": "reserved",
         "dimension": "service_tier",
     }
 
 
-@pytest.mark.parametrize("tier", ["flex", "priority"])  # standard: see the DEFAULT_PRICING tests
-def test_unknown_model_uses_fallback_rates_at_any_tier(tier):
-    from pricing import _FALLBACK_RATES
+def test_malformed_live_catalog_falls_back_to_default(pricing_bucket):
+    from pricing import DEFAULT_PRICING
 
-    _, _, fallback_applied, fallback_dimensions, rates = compute_cost(
-        "unknown.model", tier, 1, 1, 0, 0
-    )
-    assert rates == _FALLBACK_RATES
-    assert fallback_applied is True
-    assert fallback_dimensions == ["model_id"]
+    _set_live({"m": {"standard": None}})
+    mid = "us.anthropic.claude-sonnet-4-6"
+    cost, _, _, _, _ = compute_cost(mid, "standard", 1000, 0, 0, 0)
+    assert cost == DEFAULT_PRICING[mid]["standard"]["input_usd_micros_per_1k"]
+    assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
 
 
-def test_normalize_pricing_map_defaults_cache_rates_and_allows_absent_tiers():
+def test_normalize_pricing_map_defaults_cache_rates_and_skips_models_without_standard():
     from pricing import _normalize_pricing_map
 
-    normalized = _normalize_pricing_map({"m": {"standard": _STANDARD}})
+    normalized = _normalize_pricing_map(
+        {"m": {"standard": _STANDARD}, "no_std": {"flex": _FLEX}, "old": {"on_demand": _STANDARD}}
+    )
+    assert list(normalized) == ["m"]  # the others bill as unknown models
     assert list(normalized["m"]) == ["standard"]  # absent Flex/Priority is normal
     assert normalized["m"]["standard"]["cache_read_input_usd_micros_per_1k"] == 2000
-
-
-_CORRUPT_ENTRIES = {
-    "non_dict_model": (None, "not an object"),
-    "missing_standard": ({"flex": _FLEX}, "standard"),
-    "old_shape": ({"on_demand": _STANDARD}, "standard"),
-    "wrong_type_rate": (
-        {"standard": {"input_usd_micros_per_1k": "abc", "output_usd_micros_per_1k": 1}},
-        "standard",
-    ),
-    "invalid_flex": ({"standard": _STANDARD, "flex": {"input_usd_micros_per_1k": 1}}, "flex"),
-    "null_priority": ({"standard": _STANDARD, "priority": None}, "priority"),
-}
-
-
-@pytest.mark.parametrize(("entry", "tier"), _CORRUPT_ENTRIES.values(), ids=list(_CORRUPT_ENTRIES))
-def test_normalize_pricing_map_raises_on_corrupt_entry(entry, tier):
-    from pricing import _normalize_pricing_map
-
-    with pytest.raises(ValueError, match=f"bad.model: {tier}"):
-        _normalize_pricing_map({"ok": {"standard": _STANDARD}, "bad.model": entry})
-
-
-def test_normalize_pricing_map_error_keeps_the_reason():
-    from pricing import _normalize_pricing_map
-
-    bad = {"standard": {**_STANDARD, "input_usd_micros_per_1k": -1}}
-    with pytest.raises(ValueError, match="bad.model: standard: invalid rate -1"):
-        _normalize_pricing_map({"bad.model": bad})
 
 
 # ---------------------------------------------------------------------------
@@ -270,38 +237,6 @@ def test_corrupt_live_catalog_falls_back_to_default(pricing_bucket):
     assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
 
 
-@pytest.mark.parametrize(
-    "corrupt",
-    [*(e for e, _ in _CORRUPT_ENTRIES.values()), "empty"],
-    ids=[*_CORRUPT_ENTRIES, "empty"],
-)
-def test_corrupt_live_entry_bills_default_pricing_for_every_model(pricing_bucket, caplog, corrupt):
-    """One corrupt entry (or an empty catalog) condemns the whole live object."""
-    from pricing import DEFAULT_PRICING
-
-    mid = "openai.gpt-oss-120b-1:0"
-    live = {mid: {"standard": _STANDARD}, "bad.model": corrupt} if corrupt != "empty" else {}
-    _set_live(live)
-    with caplog.at_level(logging.WARNING):
-        for tier in ("standard", "flex"):
-            cost, _, fallback_applied, _, _ = compute_cost(mid, tier, 1000, 0, 0, 0)
-            assert cost == DEFAULT_PRICING[mid][tier]["input_usd_micros_per_1k"]  # not live 1000
-            assert fallback_applied is False
-    assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
-    events = [json.loads(r.message)["event"] for r in caplog.records]
-    assert events.count("pricing_source_unavailable") == 1
-
-
-@pytest.mark.parametrize("bad", [-5, True, 1.9, "12", float("inf"), None])
-def test_normalize_rates_rejects_non_int_or_negative_rates(bad):
-    from pricing import _normalize_rates
-
-    good = {"input_usd_micros_per_1k": 7, "output_usd_micros_per_1k": 9}
-    for key in (*good, "cache_read_input_usd_micros_per_1k"):
-        with pytest.raises(ValueError):
-            _normalize_rates({**good, key: bad})
-
-
 def test_transient_s3_error_falls_back_and_short_retry(monkeypatch):
     from botocore.exceptions import ClientError
 
@@ -359,19 +294,6 @@ def test_bare_mantle_model_id_falls_back(pricing_bucket):
     )
     assert fallback_applied is True
     assert "model_id" in fallback_dimensions
-
-
-def test_default_pricing_tier_spot_checks():
-    """Snapshot-coupled pins: a real tiered entry, and the scaled tier cache fallback."""
-    from pricing import DEFAULT_PRICING
-
-    gpt_oss = DEFAULT_PRICING["openai.gpt-oss-120b-1:0"]
-    assert gpt_oss["flex"]["input_usd_micros_per_1k"] == 75
-    assert gpt_oss["priority"]["input_usd_micros_per_1k"] == 262
-    assert list(DEFAULT_PRICING["us.anthropic.claude-sonnet-4-6"]) == ["standard"]
-    # No upstream Priority cache cost: filled Standard 312 x 1.75, not the tier output rate.
-    nova = DEFAULT_PRICING["amazon.nova-2-pro-preview-20251202-v1:0"]
-    assert nova["priority"]["cache_read_input_usd_micros_per_1k"] == 546
 
 
 def test_dual_provider_model_keeps_distinct_rates():

@@ -71,11 +71,8 @@ def validate_catalog(catalog: dict) -> None:
         if mid not in catalog:
             raise ValueError(f"required model {mid!r} missing from rebuilt catalog")
         for tier, base in DEFAULT_PRICING[mid].items():
-            if tier not in catalog[mid]:
-                raise ValueError(f"required model {mid!r} lost its {tier!r} tier")
-            rates = catalog[mid][tier]
             for key in ("input_usd_micros_per_1k", "output_usd_micros_per_1k"):
-                value = rates[key]
+                value = catalog[mid].get(tier, {}).get(key, 0)
                 if value <= 0:
                     raise ValueError(f"{mid}.{tier}.{key} is non-positive ({value})")
                 if not (base[key] / 10 <= value <= base[key] * 10):

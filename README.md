@@ -293,22 +293,16 @@ curl -sS -X POST "$API_URL/admin/pricing/refresh" \
 ```
 
 On success (HTTP 200) it returns a summary and the new catalog is live within one
-`pricing_cache_ttl_s` window across all instances. Each anchor model lists its rates per
-service tier (abridged here; every tier also carries cache rates):
+`pricing_cache_ttl_s` window across all instances (anchor rates per service tier,
+abridged):
 
 ```json
 {
   "entry_count": 442,
   "fetched_at": "2026-11-04T20:00:00+00:00",
   "anchors": {
-    "us.anthropic.claude-sonnet-4-6": {
-      "standard": {"input_usd_micros_per_1k": 3300, "output_usd_micros_per_1k": 16500}
-    },
-    "openai.gpt-oss-120b-1:0": {
-      "standard": {"input_usd_micros_per_1k": 150, "output_usd_micros_per_1k": 600},
-      "flex": {"input_usd_micros_per_1k": 75, "output_usd_micros_per_1k": 300},
-      "priority": {"input_usd_micros_per_1k": 262, "output_usd_micros_per_1k": 1050}
-    }
+    "us.anthropic.claude-sonnet-4-6": {"standard": {"input_usd_micros_per_1k": 3300, "output_usd_micros_per_1k": 16500}},
+    "openai.gpt-oss-120b-1:0": {"standard": {"input_usd_micros_per_1k": 150, …}, "flex": {…}, "priority": {…}}
   }
 }
 ```
@@ -322,12 +316,11 @@ curl -sS "$API_URL/admin/pricing" -H "Authorization: Bearer $(cat admin-token.tx
 ```
 
 It is **all-or-nothing and validated** — the refresh writes S3 only if the rebuilt
-catalog passes the gate (every upstream price field valid and plausible; non-empty;
-not >20% smaller than the baked-in catalog; the anchor models present with sane,
-in-band rates at every tier they carry). If the pull fails or the gate rejects it, the
-endpoint returns **`502 REFRESH_FAILED`** and **current pricing is left untouched**
-(detail is in the `pricing_refresh_failed` log, not the response). A non-admin token
-gets **`403 FORBIDDEN`**.
+catalog passes the gate (non-empty; not >20% smaller than the baked-in catalog;
+the anchor models present with sane, in-band rates at every tier). If the pull fails or
+the gate rejects it, the endpoint returns **`502 REFRESH_FAILED`** and **current
+pricing is left untouched** (detail is in the `pricing_refresh_failed` log, not the
+response). A non-admin token gets **`403 FORBIDDEN`**.
 
 The upstream source is `var.litellm_source_url`. The pricing bucket is versioned,
 so a bad refresh can be rolled back to a prior object version in S3.

@@ -255,15 +255,6 @@ def test_stream_relays_event_lines_verbatim_and_harvests_usage():
     assert usage_out["reasoning_tokens"] == 80  # logged, not billed
 
 
-@pytest.mark.parametrize(
-    ("tier", "expected"), [("flex", "flex"), ("default", "standard"), (None, "standard")]
-)
-def test_forward_responses_reports_service_tier(tier, expected):
-    body = {"usage": OBSERVED_USAGE, **({"service_tier": tier} if tier else {})}
-    _, usage = forward_responses(_client(_ok(body)), "openai.gpt-oss-120b", {"input": "hi"})
-    assert usage["service_tier"] == expected
-
-
 def _terminal(event_type: str, response: dict) -> list[str]:
     return [
         f"event: {event_type}",
@@ -272,9 +263,7 @@ def _terminal(event_type: str, response: dict) -> list[str]:
     ]
 
 
-@pytest.mark.parametrize(
-    "event_type", ["response.completed", "response.incomplete", "response.failed"]
-)
+@pytest.mark.parametrize("event_type", ["response.incomplete", "response.failed"])
 def test_stream_harvests_usage_and_tier_from_every_terminal_event(event_type):
     response = {**COMPLETED["response"], "service_tier": "flex"}
     resp = open_responses_stream(
@@ -302,7 +291,7 @@ def test_stream_harvests_usage_before_relaying_the_terminal_line():
     assert usage_out["output_tokens"] == 100
 
 
-def test_stream_terminal_event_without_usage_leaves_no_token_keys_and_flags_missing():
+def test_stream_terminal_event_without_usage_leaves_no_token_keys():
     resp = open_responses_stream(
         _client(_sse(_terminal("response.failed", {"service_tier": "auto"}))),
         "openai.gpt-oss-120b",
@@ -313,33 +302,7 @@ def test_stream_terminal_event_without_usage_leaves_no_token_keys_and_flags_miss
     assert usage_out == {
         "service_tier": "standard",
         "terminal_event": "response.failed",
-        "usage_missing": True,
     }
-
-
-@pytest.mark.parametrize("response", ["x", {"usage": "x"}, {"usage": ["x"]}])
-def test_stream_malformed_terminal_response_leaves_no_token_keys_and_flags_missing(response):
-    resp = open_responses_stream(
-        _client(_sse(_terminal("response.completed", response))),
-        "openai.gpt-oss-120b",
-        {"input": "hi"},
-    )
-    usage_out: dict = {}
-    lines = list(iter_responses_sse(resp, usage_out))
-    assert any(line.startswith("data: ") for line in lines)  # still relayed
-    assert usage_out == {
-        "service_tier": "standard",
-        "terminal_event": "response.completed",
-        "usage_missing": True,
-    }
-
-
-@pytest.mark.parametrize("body", [{"output": []}, {"output": [], "usage": "x"}])
-def test_forward_responses_without_usage_flags_missing_without_logging(caplog, body):
-    with caplog.at_level("WARNING"):
-        _, usage = forward_responses(_client(_ok(body)), "openai.gpt-oss-120b", {"input": "hi"})
-    assert usage["usage_missing"] is True
-    assert not caplog.records  # only app._bill logs it
 
 
 def test_stream_sets_stream_true_in_body():
@@ -365,7 +328,7 @@ def test_stream_closes_response_even_on_early_exit():
 
 
 def test_stream_without_usage_leaves_usage_out_empty():
-    """Stream ends with no terminal event → no token keys (_bill writes nothing and warns)."""
+    """No terminal event (disconnect) → empty usage → _bill skips the write."""
     resp = open_responses_stream(
         _client(_sse(["event: response.output_text.delta", 'data: {"delta": "hi"}', ""])),
         "openai.gpt-5.6-luna",

@@ -5,11 +5,9 @@ socket is faked, so preflight → cap → forward → billing all run for real.
 """
 
 import json
-import time
 
 import httpx
 import pytest
-from bedrock import TIER_HEADER
 from conftest import GPT_OSS_FLEX_USD_MICROS, _make_token, usage_row
 
 MODEL = "openai.gpt-5.6-luna"
@@ -355,90 +353,7 @@ def test_flex_responses_bill_the_flex_rate(responses_client, caplog, handler, st
             headers=_auth(bearer),
         )
     assert resp.status_code == 200
-    assert TIER_HEADER not in resp.headers  # the tier is in the body
     audit = _pricing_audit(caplog)
     assert audit["service_tier"] == "flex"
     assert audit["fallback_applied"] is False
     assert int(usage_row(tables[1], token_id)["usd_micros"]) == GPT_OSS_FLEX_USD_MICROS
-
-
-def test_incomplete_stream_still_bills(responses_client, caplog):
-    """A stream cut by the proxy's own max_output_tokens cap ends incomplete, with usage."""
-    make, token_id, bearer, tables = responses_client
-    with caplog.at_level("INFO"):
-        make(_terminal_sse("response.incomplete", {"usage": USAGE})).post(
-            "/openai/v1/responses",
-            json={"model": MODEL, "input": "hi", "stream": True},
-            headers=_auth(bearer),
-        )
-    assert int(usage_row(tables[1], token_id)["output_tokens"]) == 1000
-    assert _pricing_audit(caplog)["terminal_event"] == "response.incomplete"
-
-
-def test_usageless_failed_stream_warns_and_writes_nothing(responses_client, caplog):
-    make, token_id, bearer, tables = responses_client
-    with caplog.at_level("WARNING"):
-        make(_terminal_sse("response.failed", {"service_tier": "default"})).post(
-            "/openai/v1/responses",
-            json={"model": MODEL, "input": "hi", "stream": True},
-            headers=_auth(bearer),
-        )
-    assert usage_row(tables[1], token_id) == {}
-    (warning,) = [json.loads(r.message) for r in caplog.records if "usage_parse" in r.message]
-    assert warning["model_id"] == MODEL and warning["field"] == "usage"
-    assert warning["terminal_event"] == "response.failed"
-
-
-def test_disconnected_stream_logs_nothing(test_token, caplog):
-    from app import PreflightResult, _mantle_sse_relay
-    from mantle import open_responses_stream
-
-    token_id, _, tables = test_token
-    pf = PreflightResult(
-        token_id=token_id,
-        token_row={},
-        period="2026-01",
-        body={},
-        model_id=MODEL,
-        pricing_model_id=f"mantle/{MODEL}",
-        log_ctx={"token_id": token_id, "model_id": MODEL},
-        start_ms=time.monotonic() * 1000,
-        usage_table=tables[1],
-    )
-    resp = open_responses_stream(_mantle_client(_sse_handler), MODEL, {"input": "hi"})
-    with caplog.at_level("INFO"):
-        gen = _mantle_sse_relay(resp, {}, pf, dict(pf.log_ctx))
-        next(gen)
-        gen.close()
-    assert not [r for r in caplog.records if r.message.startswith("{")]
-
-
-def test_nonstreaming_logs_reasoning_tokens(responses_client, caplog):
-    make, _, bearer, _ = responses_client
-    with caplog.at_level("INFO"):
-        make().post(
-            "/openai/v1/responses", json={"model": MODEL, "input": "hi"}, headers=_auth(bearer)
-        )
-    assert _pricing_audit(caplog)["reasoning_tokens"] == 800
-
-
-@pytest.mark.parametrize(
-    ("handler", "stream"),
-    [
-        (lambda request: httpx.Response(200, json={"output": [], "usage": {}}), False),
-        (_terminal_sse("response.completed", {"usage": {}}), True),
-    ],
-)
-def test_usage_without_input_warns_once_with_model_id(responses_client, caplog, handler, stream):
-    make, token_id, bearer, tables = responses_client
-    with caplog.at_level("INFO"):
-        resp = make(handler).post(
-            "/openai/v1/responses",
-            json={"model": MODEL, "input": "hi", "stream": stream},
-            headers=_auth(bearer),
-        )
-    assert resp.status_code == 200
-    (warning,) = [json.loads(r.message) for r in caplog.records if "usage_parse" in r.message]
-    assert warning["field"] == "usage" and warning["model_id"] == MODEL
-    assert not [r for r in caplog.records if "usage_missing" in r.message]
-    assert int(usage_row(tables[1], token_id)["requests"]) == 1

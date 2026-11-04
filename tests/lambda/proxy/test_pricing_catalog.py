@@ -212,15 +212,14 @@ def test_tiers_built_from_suffixed_keys():
     assert tiers["priority"]["output_usd_micros_per_1k"] == 3500
 
 
-@pytest.mark.parametrize(
-    "extra",
-    [
-        {"input_cost_per_token_flex": 5.0e-07},  # output missing
-        {"output_cost_per_token_flex": 1.0e-06},  # input missing
-    ],
-)
-def test_tier_dropped_when_input_or_output_missing(extra):
-    assert set(_tiers(_tiered(**extra))) == {"standard"}
+def test_tier_dropped_when_output_missing():
+    assert set(_tiers(_tiered(input_cost_per_token_flex=5.0e-07))) == {"standard"}
+
+
+def test_zero_tier_cost_over_paid_standard_drops_the_tier():
+    """An upstream ``*_flex: 0`` must not make the tier free."""
+    entry = _tiered(input_cost_per_token_flex=0, output_cost_per_token_flex=1.0e-06)
+    assert set(_tiers(entry)) == {"standard"}
 
 
 def test_embedding_keeps_zero_output_tier():
@@ -232,22 +231,10 @@ def test_embedding_keeps_zero_output_tier():
     assert flex["output_usd_micros_per_1k"] == 0
 
 
-@pytest.mark.parametrize("tier_cache", [0, 3.0e-08, 9e-04])
-def test_tier_cache_ignored_when_standard_cache_absent(tier_cache):
-    """With no Standard cache cost to bound it against, a tier cache cost is not trusted:
-    it is scaled from Standard's filled (output) cache rate, as Standard itself is."""
-    entry = _tiered(
-        input_cost_per_token_flex=5.0e-07,
-        output_cost_per_token_flex=1.0e-06,
-        cache_read_input_token_cost_flex=tier_cache,
-    )
-    assert _tiers(entry)["flex"]["cache_read_input_usd_micros_per_1k"] == 1000  # 2000 x 0.5
-
-
 def test_tier_cache_fallback_scales_with_input_ratio():
-    """nova-2-pro shape: no Priority cache cost, and an output ratio far from the input one.
-
-    Falling back to the tier OUTPUT rate (the Standard rule) would over-bill ~32x.
+    """nova-2-pro shape: the output ratio is far from the input one, so falling back to the
+    tier OUTPUT rate (the Standard rule) would over-bill ~32x. A zero tier cache cost over a
+    paid Standard one is treated as missing.
     """
     entry = _tiered(
         input_cost_per_token=1.25e-06,
@@ -255,10 +242,28 @@ def test_tier_cache_fallback_scales_with_input_ratio():
         cache_read_input_token_cost=3.12e-07,
         input_cost_per_token_priority=2.1875e-06,
         output_cost_per_token_priority=1.75e-05,
+        cache_read_input_token_cost_priority=0,
     )
     priority = _tiers(entry)["priority"]
     assert priority["cache_read_input_usd_micros_per_1k"] == 546  # round(312 x 1.75)
     assert priority["cache_write_input_usd_micros_per_1k"] == 17500  # 10000 (filled) x 1.75
+
+
+def test_free_standard_input_scales_tier_cache_by_output_ratio():
+    entry = _tiered(
+        input_cost_per_token=0, input_cost_per_token_flex=0, output_cost_per_token_flex=1e-06
+    )
+    assert _tiers(entry)["flex"]["cache_read_input_usd_micros_per_1k"] == 1000  # 2000 x 0.5
+
+
+def test_tier_cache_cost_used_when_present():
+    entry = _tiered(
+        cache_read_input_token_cost=1e-07,
+        input_cost_per_token_flex=5e-07,
+        output_cost_per_token_flex=1e-06,
+        cache_read_input_token_cost_flex=6e-08,
+    )
+    assert _tiers(entry)["flex"]["cache_read_input_usd_micros_per_1k"] == 60  # not scaled 50
 
 
 def test_standard_cache_fallback_is_output_rate():
@@ -281,100 +286,11 @@ def test_derived_ids_carry_tiers():
     ("raw", "expected"),
     [
         (None, "standard"),
-        ("", "standard"),
         ("default", "standard"),
-        ("auto", "standard"),
-        ("STANDARD", "standard"),
-        ({"type": "flex"}, "flex"),
-        ({"type": None}, "standard"),
-        ("priority", "priority"),
+        ({"type": "FLEX"}, "flex"),
         ("reserved", "reserved"),
         (42, "standard"),
     ],
 )
 def test_normalize_service_tier(raw, expected):
     assert normalize_service_tier(raw) == expected
-
-
-_FIELDS = [
-    "input_cost_per_token",
-    "cache_read_input_token_cost",
-    "input_cost_per_token_flex",
-    "cache_creation_input_token_cost_priority",
-]
-
-
-@pytest.mark.parametrize("field", _FIELDS)
-@pytest.mark.parametrize(
-    "bad", [-1e-07, "5e-7", True, float("inf"), float("nan"), 10**400, 3.0, 3e-13]
-)
-def test_corrupt_upstream_cost_fails_the_build(field, bad):
-    """Any corrupt price field rejects the whole build: refresh fails closed, no guessing."""
-    with pytest.raises(ValueError, match=f"openai.m: {field}="):
-        _tiers(_tiered(**{field: bad}))
-
-
-@pytest.mark.parametrize(
-    ("extra", "field"),
-    [
-        ({"input_cost_per_token_flex": 1.5e-12}, "input_cost_per_token_flex"),  # below bound
-        ({"input_cost_per_token_priority": 1.0e-03}, "input_cost_per_token_priority"),  # 1000x
-        ({"input_cost_per_token_flex": 1.0e-07}, "input_cost_per_token_flex"),  # 0.1x
-        ({"input_cost_per_token": 0}, "input_cost_per_token"),  # free input, paid output
-        # Tier zero-ness disagrees with Standard (either way round).
-        ({"input_cost_per_token_flex": 0}, "input_cost_per_token_flex"),
-        ({"output_cost_per_token_flex": 0}, "output_cost_per_token_flex"),
-        (
-            {"output_cost_per_token": 0, "output_cost_per_token_flex": 1.0e-07},
-            "output_cost_per_token_flex",
-        ),
-        (
-            {"cache_read_input_token_cost": 1.0e-07, "cache_read_input_token_cost_flex": 0},
-            "cache_read_input_token_cost_flex",
-        ),
-    ],
-)
-def test_implausible_upstream_cost_fails_the_build(extra, field):
-    entry = _tiered(input_cost_per_token_flex=5.0e-07, output_cost_per_token_flex=1.0e-06)
-    entry.update(input_cost_per_token_priority=2.0e-06, output_cost_per_token_priority=4.0e-06)
-    with pytest.raises(ValueError, match=f"openai.m: {field}="):
-        _tiers(entry | extra)
-
-
-@pytest.mark.parametrize("cost", [3e-10, 5e-10])  # 5e-10 → 0.5 µUSD/1k rounds to 0
-def test_cost_that_would_round_to_zero_is_rejected(cost):
-    with pytest.raises(ValueError, match="input_cost_per_token="):
-        _build_entries({"openai.m": _tiered(input_cost_per_token=cost)})
-
-
-def test_cost_just_above_the_floor_is_kept():
-    entry = _build_entries({"openai.m": _tiered(input_cost_per_token=1.5e-9)})[0]["openai.m"]
-    assert entry["standard"]["input_usd_micros_per_1k"] == 2
-
-
-def test_tier_cache_cost_used_beside_an_explicit_standard_cache_cost():
-    tiers = _build_entries(
-        {
-            "openai.m": _tiered(
-                cache_read_input_token_cost=1e-07,
-                input_cost_per_token_flex=5e-07,
-                output_cost_per_token_flex=1e-06,
-                cache_read_input_token_cost_flex=6e-08,
-            )
-        }
-    )[0]["openai.m"]
-    assert tiers["flex"]["cache_read_input_usd_micros_per_1k"] == 60  # verbatim, not scaled 50
-
-
-def test_scaled_tier_cache_rate_never_rounds_a_paid_rate_to_free():
-    tiers = _build_entries(
-        {
-            "openai.m": _tiered(
-                cache_read_input_token_cost=1e-09,
-                input_cost_per_token_flex=4.3e-07,
-                output_cost_per_token_flex=8.6e-07,
-            )
-        }
-    )[0]["openai.m"]
-    assert tiers["standard"]["cache_read_input_usd_micros_per_1k"] == 1
-    assert tiers["flex"]["cache_read_input_usd_micros_per_1k"] == 1

@@ -16,7 +16,6 @@ Plus bedrock-level unit tests:
   - iter_invoke_stream cache token extraction (B2)
 """
 
-import io
 import json
 import time
 from datetime import UTC, datetime
@@ -855,7 +854,7 @@ def test_converse_stream_disconnect_with_partial_usage_writes(test_token):
     }
     log_ctx = dict(pf.log_ctx)
 
-    _bill(usage_out, pf, log_ctx, completed=False)
+    _bill(usage_out, pf, log_ctx)
 
     usage = usage_table.get_item(Key={"token_id": token_id, "period": period}).get("Item", {})
     assert int(usage.get("input_tokens", 0)) == 8
@@ -890,8 +889,8 @@ def test_invoke_stream_disconnect_partial_state():
     # input_tokens was populated but output_tokens wasn't
     assert usage_out.get("input_tokens") == 5
     assert "output_tokens" not in usage_out
-    # a token key is present, so _bill's token gate lets it through to billing
-    assert "input_tokens" in usage_out
+    # usage_out is non-empty, so _bill will attempt to bill
+    assert usage_out  # non-empty → billing path taken
 
 
 # ===========================================================================
@@ -1073,37 +1072,6 @@ def test_iter_invoke_stream_fallback_from_metrics():
     # Cache counters remain unset
     assert usage_out.get("cache_read_input_tokens", 0) == 0
     assert usage_out.get("cache_write_input_tokens", 0) == 0
-    assert "usage_missing" not in usage_out
-
-
-def test_iter_invoke_stream_metadata_without_input_flags_missing():
-    from bedrock import iter_invoke_stream
-
-    chunk = json.dumps({"metadata": {"usage": {"outputTokens": 3}}}).encode()
-    usage_out = {}
-    list(iter_invoke_stream(iter([{"chunk": {"bytes": chunk}}]), usage_out))
-    assert usage_out["output_tokens"] == 3
-    assert usage_out["usage_missing"] is True
-
-
-def test_iter_invoke_stream_metrics_fill_input_missing_from_message_start():
-    """A message_start without usage leaves input to be filled from invocationMetrics."""
-    from bedrock import iter_invoke_stream
-
-    chunks = [
-        {"type": "message_start", "message": {}},
-        {"type": "message_delta", "usage": {"output_tokens": 5}},
-        {"type": "message_stop", "amazon-bedrock-invocationMetrics": {"inputTokenCount": 9}},
-    ]
-    usage_out = {}
-    list(
-        iter_invoke_stream(
-            iter([{"chunk": {"bytes": json.dumps(c).encode()}} for c in chunks]), usage_out
-        )
-    )
-    assert usage_out["input_tokens"] == 9
-    assert usage_out["output_tokens"] == 5
-    assert "usage_missing" not in usage_out
 
 
 def test_iter_invoke_stream_fallback_does_not_overwrite_primary():
@@ -1197,81 +1165,5 @@ def test_bill_tier_only_usage_writes_nothing(test_token):
 
     token_id, _, tables = test_token
     pf = _preflight(token_id, tables[1])
-    _bill({"service_tier": "flex"}, pf, dict(pf.log_ctx), completed=False)
+    _bill({"service_tier": "flex"}, pf, dict(pf.log_ctx))
     assert usage_row(tables[1], token_id) == {}
-
-
-def test_sse_stream_input_only_usage_writes_row(test_token):
-    from app import _sse_stream
-
-    token_id, _, tables = test_token
-    pf = _preflight(token_id, tables[1])
-    usage_out = {"service_tier": "standard", "input_tokens": 9}
-    list(_sse_stream(iter([{"x": 1}]), usage_out, pf, dict(pf.log_ctx)))
-    row = usage_row(tables[1], token_id)
-    assert int(row["input_tokens"]) == 9
-    assert int(row["output_tokens"]) == 0
-
-
-def test_completed_stream_without_tokens_warns_but_disconnect_is_silent(test_token, caplog):
-    from app import _sse_stream
-
-    token_id, _, tables = test_token
-    pf = _preflight(token_id, tables[1])
-
-    # Seeded with a tier, exactly as _run_streaming does: a tier alone is not usage.
-    with caplog.at_level("WARNING"):
-        gen = _sse_stream(iter([{"x": 1}, {"y": 2}]), {"service_tier": "standard"}, pf, {})
-        next(gen)
-        gen.close()  # client disconnect: no warning
-    assert not [r for r in caplog.records if "usage_parse_warning" in r.message]
-
-    with caplog.at_level("WARNING"):
-        list(_sse_stream(iter([{"x": 1}]), {"service_tier": "standard"}, pf, dict(pf.log_ctx)))
-    (warning,) = [json.loads(r.message) for r in caplog.records if "usage_parse" in r.message]
-    assert warning["model_id"] == DEFAULT_MODEL
-    assert usage_row(tables[1], token_id) == {}
-
-
-def test_stream_error_without_tokens_stays_silent_in_the_gate(test_token, caplog):
-    """A mid-stream error already logs stream_error; the token gate must not add a warning."""
-    from app import _sse_stream
-    from bedrock import BedrockError
-
-    token_id, _, tables = test_token
-    pf = _preflight(token_id, tables[1])
-
-    def _failing():
-        yield {"x": 1}
-        raise BedrockError("BEDROCK_STREAM_ERROR", "boom", 502)
-
-    with caplog.at_level("WARNING"):
-        list(_sse_stream(_failing(), {"service_tier": "standard"}, pf, dict(pf.log_ctx)))
-    assert any("stream_error" in r.message for r in caplog.records)
-    assert not any("usage_parse_warning" in r.message for r in caplog.records)
-
-
-@pytest.mark.parametrize("route", ["converse", "converse-stream", "invoke"])
-def test_usage_without_input_warns_once_with_model_id(test_token, caplog, route):
-    """``usage: {}`` still bills (at 0), and logs one usage_parse_warning from _bill."""
-    mock_client = MagicMock()
-    if route == "converse":
-        mock_client.converse.return_value = {"output": {}, "usage": {}}
-    elif route == "converse-stream":
-        mock_client.converse_stream.return_value = {"stream": iter([{"metadata": {"usage": {}}}])}
-    else:
-        mock_client.invoke_model.return_value = {"body": io.BytesIO(b'{"usage": {}}')}
-    http_client, token_id, bearer_token, tables = _make_app_client_with_mock(
-        test_token, mock_client
-    )
-    body = _invoke_body() if route == "invoke" else _converse_body()
-    with http_client as client, caplog.at_level("INFO"):
-        resp = client.post(
-            f"/model/{ENCODED_MODEL}/{route}", json=body, headers=_auth_headers(bearer_token)
-        )
-
-    assert resp.status_code == 200
-    (warning,) = [json.loads(r.message) for r in caplog.records if "usage_parse" in r.message]
-    assert warning["field"] == "usage" and warning["model_id"] == DEFAULT_MODEL
-    assert not [r for r in caplog.records if "usage_missing" in r.message]
-    assert int(usage_row(tables[1], token_id)["requests"]) == 1

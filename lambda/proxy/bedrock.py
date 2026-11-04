@@ -29,42 +29,31 @@ _BEDROCK_KEY_MAP = {
     "cache_write_input_tokens": ["cacheWriteInputTokenCount", "cacheWriteInputTokens"],
 }
 
-# Model-agnostic count headers on every non-streaming InvokeModel response.
-_INPUT_COUNT_HEADER = "x-amzn-bedrock-input-token-count"
-_OUTPUT_COUNT_HEADER = "x-amzn-bedrock-output-token-count"
-_CACHE_READ_COUNT_HEADER = "x-amzn-bedrock-cache-read-input-token-count"
-_CACHE_WRITE_COUNT_HEADER = "x-amzn-bedrock-cache-write-input-token-count"
-_COUNT_HEADERS = (
-    _INPUT_COUNT_HEADER,
-    _OUTPUT_COUNT_HEADER,
-    _CACHE_READ_COUNT_HEADER,
-    _CACHE_WRITE_COUNT_HEADER,
-)
-
 # InvokeModel usage, first present wins: Anthropic body keys, then Bedrock-style body keys
-# (wrapped providers such as Nova), then the count headers (e.g. gpt-oss, whose body
-# reports {prompt_tokens, completion_tokens}).
+# (Nova), then the model-agnostic count headers (e.g. gpt-oss, whose body reports
+# {prompt_tokens, completion_tokens}).
 _INVOKE_KEY_MAP = {
-    "input_tokens": ["input_tokens", "inputTokens", _INPUT_COUNT_HEADER],
-    "output_tokens": ["output_tokens", "outputTokens", _OUTPUT_COUNT_HEADER],
+    "input_tokens": ["input_tokens", "inputTokens", "x-amzn-bedrock-input-token-count"],
+    "output_tokens": ["output_tokens", "outputTokens", "x-amzn-bedrock-output-token-count"],
     "cache_read_input_tokens": [
         "cache_read_input_tokens",
-        "cacheReadInputTokenCount",
-        "cacheReadInputTokens",
-        _CACHE_READ_COUNT_HEADER,
+        *_BEDROCK_KEY_MAP["cache_read_input_tokens"],
+        "x-amzn-bedrock-cache-read-input-token-count",
     ],
     "cache_write_input_tokens": [
         "cache_creation_input_tokens",
-        "cacheWriteInputTokenCount",
-        "cacheWriteInputTokens",
-        _CACHE_WRITE_COUNT_HEADER,
+        *_BEDROCK_KEY_MAP["cache_write_input_tokens"],
+        "x-amzn-bedrock-cache-write-input-token-count",
     ],
 }
 
-
-def _tier_kwargs(service_tier: str | None) -> dict:
-    """boto3 kwargs forwarding the client's requested tier, only when one was sent."""
-    return {"serviceTier": service_tier} if service_tier else {}
+# invocationMetrics name → usage key; read from any invoke-stream chunk as a fallback.
+_METRICS_KEYS = {
+    "inputTokenCount": "input_tokens",
+    "outputTokenCount": "output_tokens",
+    "cacheReadInputTokenCount": "cache_read_input_tokens",
+    "cacheWriteInputTokenCount": "cache_write_input_tokens",
+}
 
 
 def _sse_json_default(o):
@@ -149,30 +138,24 @@ def _has_key(payload: dict, key_or_keys: str | list[str]) -> bool:
 
 
 def normalize_usage(
-    usage_payload: object, key_map: dict[str, str | list[str]]
-) -> dict[str, int | bool]:
-    """Read TOKEN_KEYS from *usage_payload* via *key_map*, defaulting each to 0.
-
-    A payload that is not a dict, or holds no input-token alias, also sets ``usage_missing``
-    (and nothing otherwise). It is not a token key: app._bill logs it once, with the model,
-    as ``usage_parse_warning``. iter_invoke_stream's Claude path parses counters directly and
-    sets the flag itself when a completed stream never reports an input count.
-    """
+    usage_payload: dict | None, key_map: dict[str, str | list[str]]
+) -> dict[str, int]:
     if not isinstance(usage_payload, dict):
+        logger.warning(
+            json.dumps(
+                {"event": "usage_parse_warning", "field": "usage", "raw_value": usage_payload}
+            )
+        )
         usage_payload = {}
-    usage = {k: _parse_base10_int(_extract_value(usage_payload, key_map[k]), k) for k in TOKEN_KEYS}
-    if not _has_key(usage_payload, key_map["input_tokens"]):
-        usage["usage_missing"] = True
-    return usage
+    return {k: _parse_base10_int(_extract_value(usage_payload, key_map[k]), k) for k in TOKEN_KEYS}
 
 
-def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str | bool]]:
+def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str]]:
     """Call Bedrock Converse API and return (response_body, normalized_usage).
 
     modelId is a path parameter for the SDK; strip it from the body kwargs if
     present to avoid a duplicate-parameter error.
-    ResponseMetadata is stripped before returning to the client. The usage dict
-    carries the reported ``serviceTier`` as ``service_tier`` (normalized).
+    ResponseMetadata is stripped before returning to the client.
     """
     kwargs = {k: v for k, v in body.items() if k != "modelId"}
     try:
@@ -189,13 +172,11 @@ def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str,
 
 def forward_invoke_model(
     client, model_id: str, body: dict, service_tier: str | None = None
-) -> tuple[dict, dict[str, int | str | bool]]:
+) -> tuple[dict, dict[str, int | str]]:
     """Call Bedrock InvokeModel API and return (response_body, normalized_usage).
 
-    Usage is read model-agnostically via _INVOKE_KEY_MAP from the body's ``usage`` merged
-    over the response's token-count headers. ``service_tier`` (the client's tier header) is
-    forwarded only when set. The usage dict carries the tier Bedrock reports, normalized,
-    plus ``raw_service_tier`` (Bedrock's own value, for the echo header) when one is present.
+    Usage is read via _INVOKE_KEY_MAP from the body's ``usage`` over the token-count headers.
+    ``raw_service_tier`` (Bedrock's own value) is set for the echo header when present.
     """
     try:
         response = client.invoke_model(
@@ -203,20 +184,22 @@ def forward_invoke_model(
             body=json.dumps(body),
             contentType="application/json",
             accept="application/json",
-            **_tier_kwargs(service_tier),
+            **({"serviceTier": service_tier} if service_tier else {}),
         )
     except ParamValidationError as exc:
         raise BedrockError("BAD_REQUEST", f"Invalid request body: {exc}", 400) from exc
     except ClientError as exc:
         _raise_bedrock_error(exc)
     response_body = json.loads(response["body"].read())
-    headers = (response.get("ResponseMetadata") or {}).get("HTTPHeaders") or {}
-    header_counts = {h: headers[h] for h in _COUNT_HEADERS if h in headers}
-    body_usage = response_body.get("usage")
-    merged = {**header_counts, **(body_usage if isinstance(body_usage, dict) else {})}
+    headers = response.get("ResponseMetadata", {}).get("HTTPHeaders", {})
+    merged = {**headers, **(response_body.get("usage") or {})}
+    if not _has_key(merged, _INVOKE_KEY_MAP["input_tokens"]):
+        logger.warning(
+            json.dumps({"event": "usage_parse_warning", "field": "usage", "model_id": model_id})
+        )
     usage = normalize_usage(merged, _INVOKE_KEY_MAP)
     usage["service_tier"] = normalize_service_tier(response.get("serviceTier"))
-    if isinstance(response.get("serviceTier"), str):
+    if "serviceTier" in response:
         usage["raw_service_tier"] = response["serviceTier"]
     return response_body, usage
 
@@ -324,8 +307,7 @@ def open_invoke_stream(client, model_id: str, body: dict, service_tier: str | No
     """Open an InvokeModelWithResponseStream session and return the raw response.
 
     Performs the SDK call eagerly so call-time errors return real 4xx/5xx
-    before StreamingResponse is constructed (amendment B1). ``service_tier`` is
-    forwarded only when set; the response's ``serviceTier`` is the tier billed.
+    before StreamingResponse is constructed (amendment B1).
     """
     try:
         return client.invoke_model_with_response_stream(
@@ -333,7 +315,7 @@ def open_invoke_stream(client, model_id: str, body: dict, service_tier: str | No
             body=json.dumps(body),
             contentType="application/json",
             accept="application/json",
-            **_tier_kwargs(service_tier),
+            **({"serviceTier": service_tier} if service_tier else {}),
         )
     except ParamValidationError as exc:
         raise BedrockError("BAD_REQUEST", f"Invalid request body: {exc}", 400) from exc
@@ -350,12 +332,8 @@ def iter_invoke_stream(event_stream, usage_out: dict) -> Generator[dict, None, N
         cache_creation_input_tokens → cache_write_input_tokens.
       - message_delta.usage supplies output_tokens.
       - A ``metadata.usage`` chunk (Nova) supplies Converse-style counts.
-      - amazon-bedrock-invocationMetrics, on ANY chunk (Claude's message_stop, gpt-oss's
-        untyped last chunk, Nova's metadata chunk), is a FALLBACK only — it fills a
-        counter only when it is still absent. Typed events set a counter only when they
-        carry it. Nova's metrics read 0/0 in the same chunk as its metadata, so the metadata
-        counts win. Cache counters are filled from it the same way, when present.
-      - A completed stream that reported other counters but no input sets usage_missing.
+      - amazon-bedrock-invocationMetrics, on any chunk, is a FALLBACK only — it fills a
+        counter only when it is still absent (Nova's 0/0 metrics share its metadata chunk).
 
     Raises BedrockError on mid-stream error members (B6).
     Yields each decoded chunk dict.
@@ -373,49 +351,30 @@ def iter_invoke_stream(event_stream, usage_out: dict) -> Generator[dict, None, N
 
         # Extract usage counters progressively
         chunk_type = decoded.get("type")
-        # Typed Claude events set a counter only when they carry it, so a missing one can
-        # still be filled from invocationMetrics below.
         if chunk_type == "message_start":
             msg_usage = decoded.get("message", {}).get("usage", {})
-            for key, field in (
-                ("input_tokens", "input_tokens"),
-                ("cache_read_input_tokens", "cache_read_input_tokens"),
-                ("cache_write_input_tokens", "cache_creation_input_tokens"),
-            ):
-                if field in msg_usage:
-                    usage_out[key] = _parse_base10_int(msg_usage[field], key)
+            usage_out["input_tokens"] = _parse_base10_int(
+                msg_usage.get("input_tokens", 0), "input_tokens"
+            )
+            usage_out["cache_read_input_tokens"] = _parse_base10_int(
+                msg_usage.get("cache_read_input_tokens", 0), "cache_read_input_tokens"
+            )
+            usage_out["cache_write_input_tokens"] = _parse_base10_int(
+                msg_usage.get("cache_creation_input_tokens", 0), "cache_write_input_tokens"
+            )
         elif chunk_type == "message_delta":
             delta_usage = decoded.get("usage", {})
-            if "output_tokens" in delta_usage:
-                usage_out["output_tokens"] = _parse_base10_int(
-                    delta_usage["output_tokens"], "output_tokens"
-                )
-        elif isinstance(metadata := decoded.get("metadata"), dict) and "usage" in metadata:
+            usage_out["output_tokens"] = _parse_base10_int(
+                delta_usage.get("output_tokens", 0), "output_tokens"
+            )
+        elif "usage" in (metadata := decoded.get("metadata") or {}):
             usage_out.update(normalize_usage(metadata["usage"], _BEDROCK_KEY_MAP))
 
+        # Key-presence check (not falsiness) so a legitimate 0 from a primary event is
+        # never overwritten by invocationMetrics.
         metrics = decoded.get("amazon-bedrock-invocationMetrics", {})
-        if metrics:
-            # Fallback: fill in only if not yet populated from primary events.
-            # Key-presence check (not falsiness) so a legitimate 0 from message_start
-            # or message_delta is never overwritten by invocationMetrics.
-            if "input_tokens" not in usage_out:
-                usage_out["input_tokens"] = _parse_base10_int(
-                    metrics.get("inputTokenCount", 0), "input_tokens"
-                )
-            if "output_tokens" not in usage_out:
-                usage_out["output_tokens"] = _parse_base10_int(
-                    metrics.get("outputTokenCount", 0), "output_tokens"
-                )
-            for key, metric in (
-                ("cache_read_input_tokens", "cacheReadInputTokenCount"),
-                ("cache_write_input_tokens", "cacheWriteInputTokenCount"),
-            ):
-                if key not in usage_out and metric in metrics:
-                    usage_out[key] = _parse_base10_int(metrics[metric], key)
+        for metric, key in _METRICS_KEYS.items():
+            if key not in usage_out and metric in metrics:
+                usage_out[key] = _parse_base10_int(metrics[metric], key)
 
         yield decoded
-
-    # A stream that billed something but never reported input tokens is flagged, so it
-    # isn't billed $0 input silently (one with no counters at all hits _bill's gate).
-    if "input_tokens" not in usage_out and any(k in usage_out for k in TOKEN_KEYS):
-        usage_out["usage_missing"] = True

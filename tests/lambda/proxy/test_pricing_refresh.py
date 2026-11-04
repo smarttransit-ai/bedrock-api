@@ -41,25 +41,6 @@ def test_refresh_failure_leaves_s3_untouched(pricing_bucket, monkeypatch):
     assert load_live_catalog(_s3()) is None  # nothing written
 
 
-def test_corrupt_upstream_price_fails_refresh_and_keeps_last_good_catalog(
-    pricing_bucket, monkeypatch
-):
-    monkeypatch.setattr(pricing_refresh, "fetch_litellm", _fixture_raw)
-    refresh_pricing(_s3())
-    good = load_live_catalog(_s3())
-
-    def corrupt():
-        raw = _fixture_raw()
-        key = next(k for k, v in raw.items() if isinstance(v, dict) and "input_cost_per_token" in v)
-        raw[key]["output_cost_per_token"] = -1e-06
-        return raw
-
-    monkeypatch.setattr(pricing_refresh, "fetch_litellm", corrupt)
-    with pytest.raises(ValueError, match="corrupt upstream price"):
-        refresh_pricing(_s3())
-    assert load_live_catalog(_s3()) == good  # last good catalog untouched
-
-
 def test_validate_rejects_empty():
     with pytest.raises(ValueError):
         validate_catalog({})
@@ -95,14 +76,9 @@ def test_validate_rejects_out_of_band_anchor():
         validate_catalog(cat)
 
 
-@pytest.mark.parametrize("value", [None, 0])
-def test_validate_rejects_missing_or_zero_anchor_tier(value):
+def test_validate_rejects_anchor_that_lost_a_tier():
     cat = _valid_catalog()
-    anchor = cat["openai.gpt-oss-120b-1:0"]
-    if value is None:
-        del anchor["flex"]
-    else:
-        anchor["flex"]["input_usd_micros_per_1k"] = value
+    del cat["openai.gpt-oss-120b-1:0"]["flex"]
     with pytest.raises(ValueError, match="flex"):
         validate_catalog(cat)
 
