@@ -4716,7 +4716,8 @@ def _normalize_rates(rates: object) -> PricingRates | None:
     """Return int rates with cache rates defaulted to output, or None if the tier is unusable.
 
     Unusable means not a dict, missing input/output, or any rate that isn't a non-negative
-    int — a negative rate would credit budgets back. One bad tier is dropped on its own.
+    int — a negative rate would credit budgets back. The caller replaces or drops one bad
+    tier on its own.
     """
     if not isinstance(rates, dict):
         return None
@@ -4749,7 +4750,9 @@ def _normalize_pricing_map(raw_map: dict, fallback: PricingMap | None = None) ->
     normalized: PricingMap = {}
     for model_id, value in raw_map.items():
         if not isinstance(value, dict):
-            value = {}  # dropped below, with a log line, as a model with no Standard tier
+            # Every tier present-but-invalid: each is logged and replaced from *fallback*,
+            # or dropped (the whole model when nothing replaces Standard).
+            value = dict.fromkeys(SERVICE_TIERS)
         tiers: PricingTierMap = {}
         for tier in SERVICE_TIERS:
             rates = _normalize_rates(value[tier]) if tier in value else None
@@ -4787,9 +4790,10 @@ def _load_pricing() -> PricingMap:
         if live is None:
             _PRICING_CACHE = _default_pricing()
         else:
-            _PRICING_CACHE = _normalize_pricing_map(live, _default_pricing())
-            if not _PRICING_CACHE:
+            normalized = _normalize_pricing_map(live, _default_pricing())
+            if not normalized:
                 raise ValueError("live catalog has no valid entries")
+            _PRICING_CACHE = normalized
         ttl = _PRICING_TTL
     except Exception as exc:
         # Transient S3, or a corrupt object (unparseable, not a catalog, or no valid entry)
@@ -4819,7 +4823,7 @@ def _resolve_rates(model_id: str, service_tier: str) -> tuple[PricingRates, bool
     if model is None:
         rates, dimension = _FALLBACK_RATES, "model_id"
     elif service_tier in model:
-        return model[service_tier], False, []
+        return dict(model[service_tier]), False, []
     else:
         rates, dimension = model["standard"], "service_tier"
     logger.warning(
@@ -4832,7 +4836,7 @@ def _resolve_rates(model_id: str, service_tier: str) -> tuple[PricingRates, bool
             }
         )
     )
-    return rates, True, [dimension]
+    return dict(rates), True, [dimension]
 
 
 def compute_cost(

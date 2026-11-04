@@ -251,6 +251,8 @@ def _build_entries(
         # Token-priced embeddings (input > 0, output 0) ARE billable and kept.
         if inp_cost <= 0 and out_cost <= 0:
             continue
+        if inp_cost < 0 or out_cost < 0:  # corrupt upstream data; never emit a negative rate
+            continue
         std = _to_rates(entry, "standard")
         entries[model_id] = {"standard": std} | {
             t: r for t in SERVICE_TIERS[1:] if (r := _to_rates(entry, t, std))

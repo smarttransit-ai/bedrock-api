@@ -323,3 +323,14 @@ def test_derived_ids_carry_tiers():
 )
 def test_normalize_service_tier(raw, expected):
     assert normalize_service_tier(raw) == expected
+
+
+def test_negative_upstream_cost_is_skipped():
+    vendor = {
+        "anthropic.claude-x": {
+            "litellm_provider": "bedrock",
+            "input_cost_per_token": -1e-06,
+            "output_cost_per_token": 5e-06,
+        }
+    }
+    assert "anthropic.claude-x" not in _build_entries(vendor)[0]

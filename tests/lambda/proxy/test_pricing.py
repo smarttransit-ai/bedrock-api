@@ -309,17 +309,33 @@ def test_normalize_rates_rejects_non_int_or_negative_rates(bad):
         assert _normalize_rates({**good, key: bad}) is None
 
 
-def test_invalid_live_tier_is_replaced_from_default_pricing(pricing_bucket):
-    """A bad live Priority tier on a baked-in model bills the baked-in Priority rate."""
+@pytest.mark.parametrize("tier", ["standard", "priority"])
+def test_invalid_live_tier_is_replaced_from_default_pricing(pricing_bucket, tier):
+    """A bad live tier on a baked-in model bills the baked-in rate for that tier — not the
+    model's Standard rate (bad Priority) nor the Opus-tier fallback (bad Standard)."""
     from pricing import DEFAULT_PRICING
 
     mid = "openai.gpt-oss-120b-1:0"
-    live = {mid: {**DEFAULT_PRICING[mid], "priority": {"input_usd_micros_per_1k": -1}}}
-    _set_live(live)
-    cost, _, fallback_applied, _, _ = compute_cost(mid, "priority", 1000, 0, 0, 0)
-    # The baked-in Priority rate, not the model's Standard rate.
-    assert cost == DEFAULT_PRICING[mid]["priority"]["input_usd_micros_per_1k"]
+    _set_live({mid: {**DEFAULT_PRICING[mid], tier: {"input_usd_micros_per_1k": -1}}})
+    cost, _, fallback_applied, _, _ = compute_cost(mid, tier, 1000, 0, 0, 0)
+    assert cost == DEFAULT_PRICING[mid][tier]["input_usd_micros_per_1k"]
     assert fallback_applied is False
+
+
+def test_non_dict_live_model_recovers_every_baked_in_tier(pricing_bucket):
+    from pricing import DEFAULT_PRICING
+
+    mid = "openai.gpt-oss-120b-1:0"
+    _set_live(
+        {
+            mid: None,
+            "c.model": {"standard": {"input_usd_micros_per_1k": 1, "output_usd_micros_per_1k": 1}},
+        }
+    )
+    for tier in ("standard", "flex"):
+        cost, _, fallback_applied, _, _ = compute_cost(mid, tier, 1000, 0, 0, 0)
+        assert cost == DEFAULT_PRICING[mid][tier]["input_usd_micros_per_1k"]
+        assert fallback_applied is False
 
 
 def test_live_catalog_with_no_valid_entry_falls_back_with_short_retry(pricing_bucket):
