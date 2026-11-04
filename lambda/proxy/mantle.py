@@ -157,9 +157,7 @@ def reasoning_tokens_of(usage: dict | None) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def forward_responses(
-    client, model_id: str, body: dict
-) -> tuple[dict, dict[str, int | str | None]]:
+def forward_responses(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str]]:
     """POST /openai/v1/responses (non-streaming); return (response_body, normalized_usage).
 
     Mirrors bedrock.forward_converse's contract so the shared route body is unchanged. The

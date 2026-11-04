@@ -129,9 +129,11 @@ kept only when its input and output costs are present and each matches Standard 
 zero-ness (so an upstream `*_flex: 0` cannot make a model free). A missing Standard cache
 cost defaults to the output rate; a missing or zero-mismatched tier cache cost becomes
 Standard's cache rate scaled by the tier's input-cost ratio (output-cost ratio when
-Standard input is 0). When reading a catalog, a tier missing its input or output rate is
-dropped (`pricing_entry_invalid`), and so is the whole model when its `standard` tier is
-missing or invalid.
+Standard input is 0). When reading the live catalog, a malformed tier (not an object, missing
+its input or output rate, or any rate that isn't a non-negative integer) is logged as
+`pricing_entry_invalid` and replaced by the baked-in `DEFAULT_PRICING` rate for that model
+and tier; with no baked-in rate it is dropped, and so is the whole model when that leaves no
+`standard` tier. A live catalog with no valid entry at all is treated as corrupt.
 
 **Source of rates — single path:** the live catalog is one S3 object
 (`PRICING_BUCKET`/`pricing/catalog-v2.json`), read per-instance and cached for
@@ -213,8 +215,8 @@ Additional pricing audit records are emitted with:
 `pricing_fallback_rate` (WARNING) carries `model_id`, `service_tier` and `dimension`
 (`model_id`: unknown model, billed at the Opus-tier fallback; `service_tier`: known model
 without a rate for that tier, billed at its Standard rate). `pricing_entry_invalid`
-(WARNING) carries `model_id` and `tier` for a catalog tier missing its input or output
-rate; the tier is dropped, and the whole model when it is `standard`.
+(WARNING) carries `model_id` and `tier` for a malformed live-catalog tier; it is replaced
+from `DEFAULT_PRICING` when possible, else dropped (the whole model when it is `standard`).
 
 ---
 

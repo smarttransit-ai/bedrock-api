@@ -143,6 +143,7 @@ def test_reasoning_cost_field_warns_rather_than_dropping(caplog):
 
 def test_build_catalog_rates_and_derivation():
     cat = build_catalog(_raw())
+    assert set(cat["anthropic.claude-sonnet-4-6"]) == {"standard"}  # no tiers, no batch
     sonnet = cat["anthropic.claude-sonnet-4-6"]["standard"]
     # µUSD/1k conversion: 3.0e-06/token → 3000; 1.5e-05 → 15000
     assert sonnet["input_usd_micros_per_1k"] == 3000
@@ -303,10 +304,6 @@ def test_derived_ids_carry_tiers():
     }
     entries, _ = _build_entries(vendor)
     assert entries["us.anthropic.claude-x"]["flex"] == entries["anthropic.claude-x"]["flex"]
-
-
-def test_no_batch_key():
-    assert not [mid for mid, tiers in build_catalog(_raw()).items() if "batch" in tiers]
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,5 @@
 # ruff: noqa: E501
+import functools
 import json
 import logging
 import os
@@ -4704,35 +4705,47 @@ _PRICING_TTL: float = float(os.environ.get("PRICING_CACHE_TTL_S", "60"))
 _PRICING_RETRY_TTL: float = 5.0
 
 
+def _rate(value: object) -> int:
+    """A catalog rate: a non-negative int. Anything else (bool, float, str, negative) is unusable."""
+    if type(value) is not int or value < 0:
+        raise ValueError(f"invalid rate {value!r}")
+    return value
+
+
 def _normalize_rates(rates: object) -> PricingRates | None:
     """Return int rates with cache rates defaulted to output, or None if the tier is unusable.
 
-    Unusable means not a dict, missing input/output, or a rate that isn't an integer — one
-    bad tier is dropped on its own rather than taking the whole live catalog down.
+    Unusable means not a dict, missing input/output, or any rate that isn't a non-negative
+    int — a negative rate would credit budgets back. One bad tier is dropped on its own.
     """
     if not isinstance(rates, dict):
         return None
-    if "input_usd_micros_per_1k" not in rates or "output_usd_micros_per_1k" not in rates:
-        return None
     try:
-        input_rate = int(rates["input_usd_micros_per_1k"])
-        output_rate = int(rates["output_usd_micros_per_1k"])
+        input_rate = _rate(rates["input_usd_micros_per_1k"])
+        output_rate = _rate(rates["output_usd_micros_per_1k"])
         return {
             "input_usd_micros_per_1k": input_rate,
             "output_usd_micros_per_1k": output_rate,
-            "cache_read_input_usd_micros_per_1k": int(
+            "cache_read_input_usd_micros_per_1k": _rate(
                 rates.get("cache_read_input_usd_micros_per_1k", output_rate)
             ),
-            "cache_write_input_usd_micros_per_1k": int(
+            "cache_write_input_usd_micros_per_1k": _rate(
                 rates.get("cache_write_input_usd_micros_per_1k", output_rate)
             ),
         }
-    except (TypeError, ValueError):
+    except (KeyError, ValueError):
         return None
 
 
-def _normalize_pricing_map(raw_map: dict) -> PricingMap:
-    """Keep each service tier that normalizes; drop a model whose Standard tier does not."""
+def _normalize_pricing_map(raw_map: dict, fallback: PricingMap | None = None) -> PricingMap:
+    """Keep each service tier that normalizes; drop a model whose Standard tier does not.
+
+    A present-but-invalid tier is logged and, when *fallback* (the normalized baked-in
+    DEFAULT_PRICING) holds that model and tier, replaced by the baked-in rate — closer to
+    the truth than billing Standard (a bad Priority tier) or the Opus-tier fallback (a bad
+    Standard tier).
+    """
+    fallback = fallback or {}
     normalized: PricingMap = {}
     for model_id, value in raw_map.items():
         if not isinstance(value, dict):
@@ -4740,17 +4753,24 @@ def _normalize_pricing_map(raw_map: dict) -> PricingMap:
         tiers: PricingTierMap = {}
         for tier in SERVICE_TIERS:
             rates = _normalize_rates(value[tier]) if tier in value else None
-            if rates is not None:
-                tiers[tier] = rates
-            elif tier in value or tier == "standard":  # an absent Flex/Priority is normal
+            if rates is None and (tier in value or tier == "standard"):  # absent Flex is normal
                 logger.warning(
                     json.dumps(
                         {"event": "pricing_entry_invalid", "model_id": model_id, "tier": tier}
                     )
                 )
+                rates = fallback.get(model_id, {}).get(tier)
+            if rates is not None:
+                tiers[tier] = rates
         if "standard" in tiers:
             normalized[model_id] = tiers
     return normalized
+
+
+@functools.cache
+def _default_pricing() -> PricingMap:
+    """DEFAULT_PRICING, normalized once per process."""
+    return _normalize_pricing_map(DEFAULT_PRICING)
 
 
 def _load_pricing() -> PricingMap:
@@ -4764,14 +4784,19 @@ def _load_pricing() -> PricingMap:
         return _PRICING_CACHE
     try:
         live = load_live_catalog(get_s3())
-        _PRICING_CACHE = _normalize_pricing_map(live if live is not None else DEFAULT_PRICING)
+        if live is None:
+            _PRICING_CACHE = _default_pricing()
+        else:
+            _PRICING_CACHE = _normalize_pricing_map(live, _default_pricing())
+            if not _PRICING_CACHE:
+                raise ValueError("live catalog has no valid entries")
         ttl = _PRICING_TTL
     except Exception as exc:
-        # Transient S3, or a corrupt object (unparseable, or not a catalog at all) — serve
-        # baked-in rates, but re-check soon. A single malformed tier is dropped in
-        # _normalize_pricing_map instead, without discarding the rest of the catalog.
+        # Transient S3, or a corrupt object (unparseable, not a catalog, or no valid entry)
+        # — serve baked-in rates, but re-check soon. A single malformed tier is instead
+        # replaced from DEFAULT_PRICING in _normalize_pricing_map.
         logger.warning(json.dumps({"event": "pricing_source_unavailable", "error": str(exc)}))
-        _PRICING_CACHE = _normalize_pricing_map(DEFAULT_PRICING)
+        _PRICING_CACHE = _default_pricing()
         ttl = _PRICING_RETRY_TTL
     _PRICING_CACHE_AT = time.monotonic()
     _PRICING_CACHE_TTL = ttl

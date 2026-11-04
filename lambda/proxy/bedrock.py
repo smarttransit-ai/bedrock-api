@@ -161,7 +161,7 @@ def normalize_usage(
     return {k: _parse_base10_int(_extract_value(usage_payload, key_map[k]), k) for k in TOKEN_KEYS}
 
 
-def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str | None]]:
+def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str]]:
     """Call Bedrock Converse API and return (response_body, normalized_usage).
 
     modelId is a path parameter for the SDK; strip it from the body kwargs if
@@ -184,7 +184,7 @@ def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str,
 
 def forward_invoke_model(
     client, model_id: str, body: dict, service_tier: str | None = None
-) -> tuple[dict, dict[str, int | str | None]]:
+) -> tuple[dict, dict[str, int | str]]:
     """Call Bedrock InvokeModel API and return (response_body, normalized_usage).
 
     Usage is read model-agnostically via _INVOKE_KEY_MAP from the body's ``usage`` merged
@@ -352,8 +352,8 @@ def iter_invoke_stream(event_stream, usage_out: dict) -> Generator[dict, None, N
       - amazon-bedrock-invocationMetrics, on ANY chunk (Claude's message_stop, gpt-oss's
         untyped last chunk, Nova's metadata chunk), is a FALLBACK only — it fills a
         counter only when it is still absent. Nova's metrics read 0/0 in the same chunk
-        as its metadata, so the metadata counts win. Cache counters are never sourced
-        from invocationMetrics.
+        as its metadata, so the metadata counts win. Cache counters are filled from it
+        the same way, when the metrics carry them.
 
     Raises BedrockError on mid-stream error members (B6).
     Yields each decoded chunk dict.
@@ -403,6 +403,11 @@ def iter_invoke_stream(event_stream, usage_out: dict) -> Generator[dict, None, N
                 usage_out["output_tokens"] = _parse_base10_int(
                     metrics.get("outputTokenCount", 0), "output_tokens"
                 )
-            # Cache counters are never sourced from invocationMetrics
+            for key, metric in (
+                ("cache_read_input_tokens", "cacheReadInputTokenCount"),
+                ("cache_write_input_tokens", "cacheWriteInputTokenCount"),
+            ):
+                if key not in usage_out and metric in metrics:
+                    usage_out[key] = _parse_base10_int(metrics[metric], key)
 
         yield decoded

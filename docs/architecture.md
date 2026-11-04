@@ -220,6 +220,7 @@ graph LR
         F3["bedrock-api-service-tier-standard-count<br/>→ ServiceTierStandardCount"]
         F4["bedrock-api-service-tier-flex-count<br/>→ ServiceTierFlexCount"]
         F5["bedrock-api-service-tier-priority-count<br/>→ ServiceTierPriorityCount"]
+        F6["bedrock-api-service-tier-reserved-count<br/>→ ServiceTierReservedCount"]
     end
 
     Alarm["Alarm: bedrock-api-pricing-fallback-high<br/>fires when fallbacks &gt; max(1% of requests, 100)<br/>in any 15-minute window"]
@@ -229,6 +230,7 @@ graph LR
     Logs --> F3
     Logs --> F4
     Logs --> F5
+    Logs --> F6
     F1 --> Alarm
     F2 --> Alarm
 ```

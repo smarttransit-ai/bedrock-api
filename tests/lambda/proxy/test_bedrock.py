@@ -279,6 +279,29 @@ def test_iter_invoke_stream_gpt_oss_metrics_on_untyped_last_chunk():
     assert usage_out == {"input_tokens": 20, "output_tokens": 30}
 
 
+def test_iter_invoke_stream_metrics_fill_cache_counters():
+    events = _invoke_stream(
+        {
+            "object": "chat.completion.chunk",
+            "choices": [{"delta": {}, "finish_reason": "stop"}],
+            "amazon-bedrock-invocationMetrics": {
+                "inputTokenCount": 20,
+                "outputTokenCount": 30,
+                "cacheReadInputTokenCount": 11,
+                "cacheWriteInputTokenCount": 4,
+            },
+        },
+    )
+    usage_out: dict = {}
+    list(iter_invoke_stream(iter(events), usage_out))
+    assert usage_out == {
+        "input_tokens": 20,
+        "output_tokens": 30,
+        "cache_read_input_tokens": 11,
+        "cache_write_input_tokens": 4,
+    }
+
+
 def test_iter_invoke_stream_nova_metadata_usage_beats_zero_metrics():
     events = _invoke_stream(
         {"messageStart": {"role": "assistant"}},

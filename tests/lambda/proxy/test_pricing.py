@@ -300,6 +300,37 @@ def test_malformed_live_tier_drops_only_that_tier(pricing_bucket, caplog):
     }
 
 
+@pytest.mark.parametrize("bad", [-5, True, 1.9, "12", float("inf"), None])
+def test_normalize_rates_rejects_non_int_or_negative_rates(bad):
+    from pricing import _normalize_rates
+
+    good = {"input_usd_micros_per_1k": 7, "output_usd_micros_per_1k": 9}
+    for key in (*good, "cache_read_input_usd_micros_per_1k"):
+        assert _normalize_rates({**good, key: bad}) is None
+
+
+def test_invalid_live_tier_is_replaced_from_default_pricing(pricing_bucket):
+    """A bad live Priority tier on a baked-in model bills the baked-in Priority rate."""
+    from pricing import DEFAULT_PRICING
+
+    mid = "openai.gpt-oss-120b-1:0"
+    live = {mid: {**DEFAULT_PRICING[mid], "priority": {"input_usd_micros_per_1k": -1}}}
+    _set_live(live)
+    cost, _, fallback_applied, _, _ = compute_cost(mid, "priority", 1000, 0, 0, 0)
+    # The baked-in Priority rate, not the model's Standard rate.
+    assert cost == DEFAULT_PRICING[mid]["priority"]["input_usd_micros_per_1k"]
+    assert fallback_applied is False
+
+
+def test_live_catalog_with_no_valid_entry_falls_back_with_short_retry(pricing_bucket):
+    _set_live({"x.model": {"standard": {"input_usd_micros_per_1k": "nope"}}})
+    _, _, fallback_applied, _, _ = compute_cost(
+        "us.anthropic.claude-sonnet-4-6", "standard", 1, 1, 0, 0
+    )
+    assert fallback_applied is False  # DEFAULT_PRICING served
+    assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
+
+
 def test_transient_s3_error_falls_back_and_short_retry(monkeypatch):
     from botocore.exceptions import ClientError
 

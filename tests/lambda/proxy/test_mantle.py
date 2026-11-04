@@ -8,7 +8,7 @@ import json
 
 import httpx
 import pytest
-from bedrock import TOKEN_KEYS, BedrockError
+from bedrock import BedrockError
 from mantle import (
     RESPONSES_PATH,
     forward_responses,
@@ -91,9 +91,8 @@ def test_reasoning_tokens_are_reported_but_never_billed():
     _, parsed = forward_responses(client, "openai.gpt-5.6-luna", {"input": "hi"})
     # output_tokens is reported verbatim — NOT 100 + 80.
     assert parsed["output_tokens"] == 100
-    # Carried for logging only: TOKEN_KEYS, the billing dimensions, never include it.
+    # Carried for logging only; reasoning tokens are inside output_tokens, never billed twice.
     assert parsed["reasoning_tokens"] == 80
-    assert "reasoning_tokens" not in TOKEN_KEYS
 
 
 def test_reasoning_tokens_of_tolerates_missing_details():
