@@ -289,6 +289,17 @@ def test_iter_invoke_stream_gpt_oss_metrics_on_untyped_last_chunk():
     assert usage_out == {"input_tokens": 20, "output_tokens": 30}
 
 
+def test_iter_invoke_stream_message_start_without_usage_flags_usage_missing():
+    events = _invoke_stream(
+        {"type": "message_start", "message": {}},
+        {"type": "message_delta", "usage": {"output_tokens": 5}},
+    )
+    usage_out: dict = {}
+    list(iter_invoke_stream(iter(events), usage_out))
+    assert usage_out["usage_missing"] is True
+    assert usage_out["input_tokens"] == 0
+
+
 def test_iter_invoke_stream_metrics_fill_cache_counters():
     events = _invoke_stream(
         {

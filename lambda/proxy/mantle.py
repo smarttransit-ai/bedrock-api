@@ -157,7 +157,9 @@ def reasoning_tokens_of(usage: object) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def forward_responses(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str]]:
+def forward_responses(
+    client, model_id: str, body: dict
+) -> tuple[dict, dict[str, int | str | bool]]:
     """POST /openai/v1/responses (non-streaming); return (response_body, normalized_usage).
 
     Mirrors bedrock.forward_converse's contract so the shared route body is unchanged. The
@@ -227,7 +229,7 @@ def iter_responses_sse(resp, usage_out: dict) -> Generator[str, None, None]:
             # Harvest BEFORE relaying: a client that disconnects right after the terminal
             # event closes this generator at the yield, and its usage must already be read.
             payload = _safe_json(line[len("data:") :].strip()) if line.startswith("data:") else None
-            if payload and payload.get("type") in _TERMINAL_EVENTS:
+            if payload and isinstance(t := payload.get("type"), str) and t in _TERMINAL_EVENTS:
                 response = payload.get("response")
                 response = response if isinstance(response, dict) else {}
                 usage_out["service_tier"] = normalize_service_tier(response.get("service_tier"))

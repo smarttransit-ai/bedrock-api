@@ -127,11 +127,11 @@ floats).
 **Catalog shape:** `{model_id: {"standard": rates, "flex"?: rates, "priority"?: rates}}`,
 built from litellm's base and `*_flex` / `*_priority` cost fields. A Flex/Priority tier is
 kept only when its input and output costs are present. A missing Standard cache cost
-defaults to the output rate; a missing tier cache cost (or one that differs on zero-ness
-from Standard's filled cache rate) becomes Standard's cache rate scaled by the tier's
-input-cost ratio. Any corrupt or implausible upstream price field rejects the whole build,
+defaults to the output rate. A tier cache cost is used only beside an explicit Standard
+cache cost, which bounds it; otherwise it is Standard's filled cache rate scaled by the
+tier's input-cost ratio, and a paid rate never scales down to 0. Any corrupt or implausible upstream price field rejects the whole build,
 so a refresh fails closed and the last good catalog stays live: a value that is negative,
-non-finite, bool or string; a positive cost outside $0.0005 to $1,000 per 1M tokens; a
+non-finite, bool or string; a positive cost that rounds to 0 or exceeds $1,000 per 1M tokens; a
 Standard input of 0 with a paid output; or a Flex/Priority cost that differs from the
 matching Standard cost on zero-ness or by more than 4x either way. Reading the live catalog
 follows one rule: any corrupt entry (a model that isn't an object or has no `standard`

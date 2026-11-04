@@ -352,6 +352,20 @@ def test_cost_just_above_the_floor_is_kept():
     assert entry["standard"]["input_usd_micros_per_1k"] == 2
 
 
+def test_tier_cache_cost_used_beside_an_explicit_standard_cache_cost():
+    tiers = _build_entries(
+        {
+            "openai.m": _tiered(
+                cache_read_input_token_cost=1e-07,
+                input_cost_per_token_flex=5e-07,
+                output_cost_per_token_flex=1e-06,
+                cache_read_input_token_cost_flex=6e-08,
+            )
+        }
+    )[0]["openai.m"]
+    assert tiers["flex"]["cache_read_input_usd_micros_per_1k"] == 60  # verbatim, not scaled 50
+
+
 def test_scaled_tier_cache_rate_never_rounds_a_paid_rate_to_free():
     tiers = _build_entries(
         {

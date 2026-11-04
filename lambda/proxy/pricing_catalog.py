@@ -98,10 +98,10 @@ _COST_FIELD_NAMES = tuple(
     field + suffix for field in _COST_FIELDS.values() for suffix in _TIER_SUFFIXES.values()
 )
 
-# Plausible bounds: a positive cost in USD/token ($0.0005 to $1,000 per 1M tokens) — the
-# floor is where a cost still rounds to >= 1 µUSD/1k, so nothing positive is stored as free
-# — and a Flex/Priority cost as a multiple of the matching Standard cost.
-_COST_BOUNDS = (5e-10, 1e-3)
+# Plausibility: a positive cost must round to >= 1 µUSD/1k (so nothing paid is stored as
+# free) and be at most _MAX_COST USD/token ($1,000 per 1M); a Flex/Priority cost must stay
+# within _TIER_RATIO_BOUNDS of the matching Standard cost.
+_MAX_COST = 1e-3
 _TIER_RATIO_BOUNDS = (0.25, 4)
 
 
@@ -144,8 +144,8 @@ def _check_costs(model_id: str, entry: dict) -> None:
     """Reject corrupt or implausible upstream data outright rather than guess a price.
 
     Raises ValueError on a present cost field that is not a finite, non-negative int or
-    float (bool and string included), a positive cost outside ``_COST_BOUNDS``, a free
-    Standard input with a paid output, or a Flex/Priority cost that differs from the
+    float (bool and string included), a positive cost that rounds to 0 µUSD/1k or exceeds
+    ``_MAX_COST``, a free Standard input with a paid output, or a Flex/Priority cost that differs from the
     matching Standard cost on zero-ness or by a ratio outside ``_TIER_RATIO_BOUNDS``. A
     live refresh then fails closed — the last good catalog stays in S3 — and gen_pricing
     exits. Stale prices are recoverable; a wrong price bills real budgets.
@@ -160,11 +160,7 @@ def _check_costs(model_id: str, entry: dict) -> None:
         # cost must still be positive once stored (>= 1 µUSD/1k), so nothing paid is free.
         if value is not None and (
             type(value) not in (int, float)
-            or not (
-                value == 0
-                or (_COST_BOUNDS[0] <= value <= _COST_BOUNDS[1])
-                and _per_token_to_micros_per_1k(value) >= 1
-            )
+            or not (value == 0 or (value <= _MAX_COST and _per_token_to_micros_per_1k(value) >= 1))
         ):
             raise corrupt(field)
     if entry["input_cost_per_token"] == 0 < entry["output_cost_per_token"]:

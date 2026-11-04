@@ -150,13 +150,13 @@ def _has_key(payload: dict, key_or_keys: str | list[str]) -> bool:
 
 def normalize_usage(
     usage_payload: object, key_map: dict[str, str | list[str]]
-) -> dict[str, int | bool]:
+) -> dict[str, int | str | bool]:
     """Read TOKEN_KEYS from *usage_payload* via *key_map*, defaulting each to 0.
 
     A payload that is not a dict, or holds no input-token alias, also sets ``usage_missing``
     (and nothing otherwise). It is not a token key: app._bill logs it once, with the model,
     as ``usage_parse_warning``. iter_invoke_stream's Claude path parses counters directly and
-    relies on _bill's completed-without-tokens warning instead.
+    sets the flag itself when ``message_start`` carries no input count.
     """
     if not isinstance(usage_payload, dict):
         usage_payload = {}
@@ -166,7 +166,7 @@ def normalize_usage(
     return usage
 
 
-def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str]]:
+def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str, int | str | bool]]:
     """Call Bedrock Converse API and return (response_body, normalized_usage).
 
     modelId is a path parameter for the SDK; strip it from the body kwargs if
@@ -189,7 +189,7 @@ def forward_converse(client, model_id: str, body: dict) -> tuple[dict, dict[str,
 
 def forward_invoke_model(
     client, model_id: str, body: dict, service_tier: str | None = None
-) -> tuple[dict, dict[str, int | str]]:
+) -> tuple[dict, dict[str, int | str | bool]]:
     """Call Bedrock InvokeModel API and return (response_body, normalized_usage).
 
     Usage is read model-agnostically via _INVOKE_KEY_MAP from the body's ``usage`` merged
@@ -216,7 +216,7 @@ def forward_invoke_model(
     merged = {**header_counts, **(body_usage if isinstance(body_usage, dict) else {})}
     usage = normalize_usage(merged, _INVOKE_KEY_MAP)
     usage["service_tier"] = normalize_service_tier(response.get("serviceTier"))
-    if "serviceTier" in response:
+    if isinstance(response.get("serviceTier"), str):
         usage["raw_service_tier"] = response["serviceTier"]
     return response_body, usage
 
@@ -374,6 +374,8 @@ def iter_invoke_stream(event_stream, usage_out: dict) -> Generator[dict, None, N
         chunk_type = decoded.get("type")
         if chunk_type == "message_start":
             msg_usage = decoded.get("message", {}).get("usage", {})
+            if "input_tokens" not in msg_usage:
+                usage_out["usage_missing"] = True
             usage_out["input_tokens"] = _parse_base10_int(
                 msg_usage.get("input_tokens", 0), "input_tokens"
             )

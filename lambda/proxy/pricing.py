@@ -4756,7 +4756,9 @@ def _normalize_pricing_map(raw_map: dict) -> PricingMap:
                 try:
                     tiers[tier] = _normalize_rates(value[tier])
                 except ValueError as exc:
-                    raise ValueError(f"invalid pricing entry for {model_id}: {tier}") from exc
+                    raise ValueError(
+                        f"invalid pricing entry for {model_id}: {tier}: {exc}"
+                    ) from exc
         normalized[model_id] = tiers
     return normalized
 

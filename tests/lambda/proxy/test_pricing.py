@@ -126,6 +126,14 @@ def test_normalize_pricing_map_raises_on_corrupt_entry(entry, tier):
         _normalize_pricing_map({"ok": {"standard": _STANDARD}, "bad.model": entry})
 
 
+def test_normalize_pricing_map_error_keeps_the_reason():
+    from pricing import _normalize_pricing_map
+
+    bad = {"standard": {**_STANDARD, "input_usd_micros_per_1k": -1}}
+    with pytest.raises(ValueError, match="bad.model: standard: invalid rate -1"):
+        _normalize_pricing_map({"bad.model": bad})
+
+
 # ---------------------------------------------------------------------------
 # DEFAULT_PRICING fallback path (no live catalog object present)
 # ---------------------------------------------------------------------------
