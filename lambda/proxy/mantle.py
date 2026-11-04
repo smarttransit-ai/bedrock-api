@@ -121,7 +121,7 @@ USAGE_KEY_MAP = {
 }
 
 
-def _to_exclusive_input(usage: dict[str, int]) -> dict[str, int]:
+def _to_exclusive_input(usage: dict[str, int | bool]) -> dict[str, int | bool]:
     """Make input_tokens exclusive of the cache counters, as Converse already reports it.
 
     The two upstreams disagree, and compute_cost only works for one of them:

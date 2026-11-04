@@ -339,7 +339,7 @@ def test_forward_responses_without_usage_flags_missing_without_logging(caplog, b
     with caplog.at_level("WARNING"):
         _, usage = forward_responses(_client(_ok(body)), "openai.gpt-oss-120b", {"input": "hi"})
     assert usage["usage_missing"] is True
-    assert not caplog.records  # app._bill logs it once; normalize_usage never double-warns
+    assert not caplog.records  # only app._bill logs it
 
 
 def test_stream_sets_stream_true_in_body():
@@ -365,7 +365,7 @@ def test_stream_closes_response_even_on_early_exit():
 
 
 def test_stream_without_usage_leaves_usage_out_empty():
-    """No terminal event (disconnect) → empty usage → _bill skips the write."""
+    """Stream ends with no terminal event → no token keys (_bill writes nothing and warns)."""
     resp = open_responses_stream(
         _client(_sse(["event: response.output_text.delta", 'data: {"delta": "hi"}', ""])),
         "openai.gpt-5.6-luna",

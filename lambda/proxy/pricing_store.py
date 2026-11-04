@@ -4,7 +4,7 @@ The live catalog is one JSON object in S3 (``PRICING_BUCKET`` / ``PRICING_OBJECT
     {"catalog": {<model_id>: {standard, flex?, priority?}}, "meta": {...}}
 
 ``pricing.py`` reads it (TTL-cached) and falls back to the baked-in DEFAULT_PRICING
-when it is absent or unreachable. ``pricing_refresh.py`` writes it.
+when it is absent, unreachable or corrupt. ``pricing_refresh.py`` writes it.
 """
 
 from __future__ import annotations

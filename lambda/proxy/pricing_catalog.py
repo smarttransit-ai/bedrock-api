@@ -153,7 +153,7 @@ def _check_costs(model_id: str, entry: dict) -> None:
     """
 
     def corrupt(field: str) -> ValueError:
-        return ValueError(f"corrupt upstream price for {model_id}: {field}={entry[field]!r}")
+        return ValueError(f"corrupt upstream price for {model_id}: {field}={entry.get(field)!r}")
 
     for field in _COST_FIELD_NAMES:
         value = entry.get(field)

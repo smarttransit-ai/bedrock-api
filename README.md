@@ -274,7 +274,7 @@ Revoking an already-revoked token is a no-op (exits 0).
 
 Pricing is served from a live catalog in S3 (`<name_prefix>-pricing-<account>`,
 object `pricing/catalog-v2.json`), cached per-instance for `pricing_cache_ttl_s`
-(default 60s). When the object is absent or unreachable, the proxy falls back to
+(default 60s). When the object is absent, unreachable or corrupt, the proxy falls back to
 the rates baked into the image (`DEFAULT_PRICING`). To update prices on a running
 deployment — no redeploy — re-pull from litellm via the admin endpoint.
 
