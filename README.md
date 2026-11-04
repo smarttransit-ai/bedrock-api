@@ -323,10 +323,11 @@ curl -sS "$API_URL/admin/pricing" -H "Authorization: Bearer $(cat admin-token.tx
 
 It is **all-or-nothing and validated** — the refresh writes S3 only if the rebuilt
 catalog passes the gate (every upstream price field valid and plausible; non-empty;
-not >20% smaller than the baked-in catalog; the anchor models present with sane, in-band rates at every tier they carry). If the pull fails or
-the gate rejects it, the endpoint returns **`502 REFRESH_FAILED`** and **current
-pricing is left untouched** (detail is in the `pricing_refresh_failed` log, not the
-response). A non-admin token gets **`403 FORBIDDEN`**.
+not >20% smaller than the baked-in catalog; the anchor models present with sane,
+in-band rates at every tier they carry). If the pull fails or the gate rejects it, the
+endpoint returns **`502 REFRESH_FAILED`** and **current pricing is left untouched**
+(detail is in the `pricing_refresh_failed` log, not the response). A non-admin token
+gets **`403 FORBIDDEN`**.
 
 The upstream source is `var.litellm_source_url`. The pricing bucket is versioned,
 so a bad refresh can be rolled back to a prior object version in S3.

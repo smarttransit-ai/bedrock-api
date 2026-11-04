@@ -1072,6 +1072,7 @@ def test_iter_invoke_stream_fallback_from_metrics():
     assert usage_out["output_tokens"] == 10
     # Cache counters remain unset
     assert usage_out.get("cache_read_input_tokens", 0) == 0
+    assert usage_out.get("cache_write_input_tokens", 0) == 0
     assert "usage_missing" not in usage_out
 
 
@@ -1083,7 +1084,26 @@ def test_iter_invoke_stream_metadata_without_input_flags_missing():
     list(iter_invoke_stream(iter([{"chunk": {"bytes": chunk}}]), usage_out))
     assert usage_out["output_tokens"] == 3
     assert usage_out["usage_missing"] is True
-    assert usage_out.get("cache_write_input_tokens", 0) == 0
+
+
+def test_iter_invoke_stream_metrics_fill_input_missing_from_message_start():
+    """A message_start without usage leaves input to be filled from invocationMetrics."""
+    from bedrock import iter_invoke_stream
+
+    chunks = [
+        {"type": "message_start", "message": {}},
+        {"type": "message_delta", "usage": {"output_tokens": 5}},
+        {"type": "message_stop", "amazon-bedrock-invocationMetrics": {"inputTokenCount": 9}},
+    ]
+    usage_out = {}
+    list(
+        iter_invoke_stream(
+            iter([{"chunk": {"bytes": json.dumps(c).encode()}} for c in chunks]), usage_out
+        )
+    )
+    assert usage_out["input_tokens"] == 9
+    assert usage_out["output_tokens"] == 5
+    assert "usage_missing" not in usage_out
 
 
 def test_iter_invoke_stream_fallback_does_not_overwrite_primary():

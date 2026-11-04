@@ -129,17 +129,18 @@ built from litellm's base and `*_flex` / `*_priority` cost fields. A Flex/Priori
 kept only when its input and output costs are present. A missing Standard cache cost
 defaults to the output rate. A tier cache cost is used only beside an explicit Standard
 cache cost, which bounds it; otherwise it is Standard's filled cache rate scaled by the
-tier's input-cost ratio, and a paid rate never scales down to 0. Any corrupt or implausible upstream price field rejects the whole build,
-so a refresh fails closed and the last good catalog stays live: a value that is negative,
-non-finite, bool or string; a positive cost that rounds to 0 or exceeds $1,000 per 1M tokens; a
-Standard input of 0 with a paid output; or a Flex/Priority cost that differs from the
-matching Standard cost on zero-ness or by more than 4x either way. Reading the live catalog
-follows one rule: any corrupt entry (a model that isn't an object or has no `standard`
-tier, or a present tier that isn't an object, lacks its input or output rate, or holds a
-rate that isn't a non-negative integer) — or an empty catalog — makes the whole object
-corrupt, so every model bills `DEFAULT_PRICING` (logged as `pricing_source_unavailable`)
-until the next re-check; a model only the live catalog knows bills the Opus-tier fallback
-meanwhile. A refresh never writes such an object, since its build is stricter.
+tier's input-cost ratio, and a paid rate never scales down to 0. Any corrupt or implausible
+upstream price field rejects the whole build, so a refresh fails closed and the last good
+catalog stays live: a value that is negative, non-finite, bool or string; a positive cost
+that rounds to 0 or exceeds $1,000 per 1M tokens; a Standard input of 0 with a paid output;
+or a Flex/Priority cost that differs from the matching Standard cost on zero-ness or by more
+than 4x either way. Reading the live catalog follows one rule: any corrupt entry (a model
+that isn't an object or has no `standard` tier, or a present tier that isn't an object,
+lacks its input or output rate, or holds a rate that isn't a non-negative integer) — or an
+empty catalog — makes the whole object corrupt, so every model bills `DEFAULT_PRICING`
+(logged as `pricing_source_unavailable`) until the next re-check; a model only the live
+catalog knows bills the Opus-tier fallback meanwhile. A refresh never writes such an object,
+since its build is stricter.
 
 **Source of rates — single path:** the live catalog is one S3 object
 (`PRICING_BUCKET`/`pricing/catalog-v2.json`), read per-instance and cached for

@@ -297,7 +297,7 @@ def test_iter_invoke_stream_message_start_without_usage_flags_usage_missing():
     usage_out: dict = {}
     list(iter_invoke_stream(iter(events), usage_out))
     assert usage_out["usage_missing"] is True
-    assert usage_out["input_tokens"] == 0
+    assert "input_tokens" not in usage_out  # _bill bills it as 0, with the warning
 
 
 def test_iter_invoke_stream_metrics_fill_cache_counters():

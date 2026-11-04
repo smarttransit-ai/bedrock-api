@@ -233,7 +233,7 @@ def iter_responses_sse(resp, usage_out: dict) -> Generator[str, None, None]:
                 response = payload.get("response")
                 response = response if isinstance(response, dict) else {}
                 usage_out["service_tier"] = normalize_service_tier(response.get("service_tier"))
-                usage_out["terminal_event"] = payload["type"]
+                usage_out["terminal_event"] = t
                 usage = response.get("usage")
                 if isinstance(usage, dict):
                     usage_out.update(

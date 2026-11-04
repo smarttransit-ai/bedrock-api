@@ -150,13 +150,13 @@ def _has_key(payload: dict, key_or_keys: str | list[str]) -> bool:
 
 def normalize_usage(
     usage_payload: object, key_map: dict[str, str | list[str]]
-) -> dict[str, int | str | bool]:
+) -> dict[str, int | bool]:
     """Read TOKEN_KEYS from *usage_payload* via *key_map*, defaulting each to 0.
 
     A payload that is not a dict, or holds no input-token alias, also sets ``usage_missing``
     (and nothing otherwise). It is not a token key: app._bill logs it once, with the model,
     as ``usage_parse_warning``. iter_invoke_stream's Claude path parses counters directly and
-    sets the flag itself when ``message_start`` carries no input count.
+    sets the flag itself when a completed stream never reports an input count.
     """
     if not isinstance(usage_payload, dict):
         usage_payload = {}
@@ -210,7 +210,7 @@ def forward_invoke_model(
     except ClientError as exc:
         _raise_bedrock_error(exc)
     response_body = json.loads(response["body"].read())
-    headers = (response.get("ResponseMetadata") or {}).get("HTTPHeaders", {})
+    headers = (response.get("ResponseMetadata") or {}).get("HTTPHeaders") or {}
     header_counts = {h: headers[h] for h in _COUNT_HEADERS if h in headers}
     body_usage = response_body.get("usage")
     merged = {**header_counts, **(body_usage if isinstance(body_usage, dict) else {})}
@@ -352,9 +352,10 @@ def iter_invoke_stream(event_stream, usage_out: dict) -> Generator[dict, None, N
       - A ``metadata.usage`` chunk (Nova) supplies Converse-style counts.
       - amazon-bedrock-invocationMetrics, on ANY chunk (Claude's message_stop, gpt-oss's
         untyped last chunk, Nova's metadata chunk), is a FALLBACK only — it fills a
-        counter only when it is still absent. Nova's metrics read 0/0 in the same chunk
-        as its metadata, so the metadata counts win. Cache counters are filled from it
-        the same way, when the metrics carry them.
+        counter only when it is still absent. Typed events set a counter only when they
+        carry it. Nova's metrics read 0/0 in the same chunk as its metadata, so the metadata
+        counts win. Cache counters are filled from it the same way, when present.
+      - A completed stream that reported other counters but no input sets usage_missing.
 
     Raises BedrockError on mid-stream error members (B6).
     Yields each decoded chunk dict.
@@ -372,24 +373,23 @@ def iter_invoke_stream(event_stream, usage_out: dict) -> Generator[dict, None, N
 
         # Extract usage counters progressively
         chunk_type = decoded.get("type")
+        # Typed Claude events set a counter only when they carry it, so a missing one can
+        # still be filled from invocationMetrics below.
         if chunk_type == "message_start":
             msg_usage = decoded.get("message", {}).get("usage", {})
-            if "input_tokens" not in msg_usage:
-                usage_out["usage_missing"] = True
-            usage_out["input_tokens"] = _parse_base10_int(
-                msg_usage.get("input_tokens", 0), "input_tokens"
-            )
-            usage_out["cache_read_input_tokens"] = _parse_base10_int(
-                msg_usage.get("cache_read_input_tokens", 0), "cache_read_input_tokens"
-            )
-            usage_out["cache_write_input_tokens"] = _parse_base10_int(
-                msg_usage.get("cache_creation_input_tokens", 0), "cache_write_input_tokens"
-            )
+            for key, field in (
+                ("input_tokens", "input_tokens"),
+                ("cache_read_input_tokens", "cache_read_input_tokens"),
+                ("cache_write_input_tokens", "cache_creation_input_tokens"),
+            ):
+                if field in msg_usage:
+                    usage_out[key] = _parse_base10_int(msg_usage[field], key)
         elif chunk_type == "message_delta":
             delta_usage = decoded.get("usage", {})
-            usage_out["output_tokens"] = _parse_base10_int(
-                delta_usage.get("output_tokens", 0), "output_tokens"
-            )
+            if "output_tokens" in delta_usage:
+                usage_out["output_tokens"] = _parse_base10_int(
+                    delta_usage["output_tokens"], "output_tokens"
+                )
         elif isinstance(metadata := decoded.get("metadata"), dict) and "usage" in metadata:
             usage_out.update(normalize_usage(metadata["usage"], _BEDROCK_KEY_MAP))
 
@@ -414,3 +414,8 @@ def iter_invoke_stream(event_stream, usage_out: dict) -> Generator[dict, None, N
                     usage_out[key] = _parse_base10_int(metrics[metric], key)
 
         yield decoded
+
+    # A stream that billed something but never reported input tokens is flagged, so it
+    # isn't billed $0 input silently (one with no counters at all hits _bill's gate).
+    if "input_tokens" not in usage_out and any(k in usage_out for k in TOKEN_KEYS):
+        usage_out["usage_missing"] = True
