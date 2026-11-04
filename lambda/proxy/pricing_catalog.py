@@ -131,6 +131,11 @@ def _per_token_to_micros_per_1k(v: float) -> int:
     return round(v * 1e9)
 
 
+def _is_cost(value: object) -> bool:
+    """A usable litellm per-token cost: a non-negative int or float (not bool)."""
+    return type(value) in (int, float) and value >= 0
+
+
 def _to_rates(
     entry: dict, tier: str, standard: dict[str, int] | None = None
 ) -> dict[str, int] | None:
@@ -150,8 +155,17 @@ def _to_rates(
     """
     suffix = _TIER_SUFFIXES[tier]
     costs = {rate: entry.get(field + suffix) for rate, field in _COST_FIELDS.items()}
+    # A corrupt cache cost is treated as missing (it takes the fallback below). A corrupt
+    # Flex/Priority input/output drops just that tier, so one bad field can't fail a refresh.
+    # Standard input/output pass through as-is: a negative one is rejected at runtime, where
+    # the baked-in rate can replace it (dropping the model here would bill the Opus fallback).
+    for rate in _CACHE_RATES:
+        if not _is_cost(costs[rate]):
+            costs[rate] = None
     inp, out = costs["input_usd_micros_per_1k"], costs["output_usd_micros_per_1k"]
     if inp is None or out is None:
+        return None
+    if tier != "standard" and not (_is_cost(inp) and _is_cost(out)):
         return None
     if tier == "standard":
         return {
@@ -250,8 +264,6 @@ def _build_entries(
         # models at 0/0. Including them would underbill (route to fallback at $0).
         # Token-priced embeddings (input > 0, output 0) ARE billable and kept.
         if inp_cost <= 0 and out_cost <= 0:
-            continue
-        if inp_cost < 0 or out_cost < 0:  # corrupt upstream data; never emit a negative rate
             continue
         std = _to_rates(entry, "standard")
         entries[model_id] = {"standard": std} | {

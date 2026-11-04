@@ -227,7 +227,8 @@ def iter_responses_sse(resp, usage_out: dict) -> Generator[str, None, None]:
             # event closes this generator at the yield, and its usage must already be read.
             payload = _safe_json(line[len("data:") :].strip()) if line.startswith("data:") else None
             if payload and payload.get("type") in _TERMINAL_EVENTS:
-                response = payload.get("response") or {}
+                response = payload.get("response")
+                response = response if isinstance(response, dict) else {}
                 usage_out["service_tier"] = normalize_service_tier(response.get("service_tier"))
                 usage_out["terminal_event"] = payload["type"]
                 usage = response.get("usage")

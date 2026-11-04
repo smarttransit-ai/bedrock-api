@@ -35,9 +35,9 @@ sends for `serviceTier`) to Bedrock; non-streaming `/invoke` echoes Bedrock's re
 back in the same header. Converse and Responses carry the tier in the body both ways.
 Invoke usage is read model-agnostically — Anthropic body keys, then Bedrock-style keys, then
 the `x-amzn-bedrock-{input,output,cache-read-input,cache-write-input}-token-count` headers
-(streaming: `metadata.usage` or `amazon-bedrock-invocationMetrics` on any chunk) — so non-
-Claude models (gpt-oss, Nova, Llama, …) bill on `/invoke` and invoke-stream rather than at
-$0.
+(streaming: `metadata.usage` or `amazon-bedrock-invocationMetrics` on any chunk) — so
+non-Claude models (gpt-oss, Nova, Llama, …) bill on `/invoke` and invoke-stream rather than
+at $0.
 
 ---
 

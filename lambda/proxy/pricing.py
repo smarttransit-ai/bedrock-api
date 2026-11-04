@@ -4739,7 +4739,8 @@ def _normalize_rates(rates: object) -> PricingRates | None:
 
 
 def _normalize_pricing_map(raw_map: dict, fallback: PricingMap | None = None) -> PricingMap:
-    """Keep each service tier that normalizes; drop a model whose Standard tier does not.
+    """Keep each service tier that normalizes; drop a model whose Standard tier does not and
+    cannot be replaced from *fallback*.
 
     A present-but-invalid tier is logged and, when *fallback* (the normalized baked-in
     DEFAULT_PRICING) holds that model and tier, replaced by the baked-in rate — closer to
@@ -4750,9 +4751,9 @@ def _normalize_pricing_map(raw_map: dict, fallback: PricingMap | None = None) ->
     normalized: PricingMap = {}
     for model_id, value in raw_map.items():
         if not isinstance(value, dict):
-            # Every tier present-but-invalid: each is logged and replaced from *fallback*,
-            # or dropped (the whole model when nothing replaces Standard).
-            value = dict.fromkeys(SERVICE_TIERS)
+            # Treat Standard, and each tier the baked-in catalog has, as present-but-invalid:
+            # each is logged and replaced from *fallback*, or the model is dropped.
+            value = dict.fromkeys({"standard", *fallback.get(model_id, {})})
         tiers: PricingTierMap = {}
         for tier in SERVICE_TIERS:
             rates = _normalize_rates(value[tier]) if tier in value else None
@@ -4817,7 +4818,7 @@ def _resolve_rates(model_id: str, service_tier: str) -> tuple[PricingRates, bool
     """Return (rates, fallback_applied, fallback_dimensions) for a model at a service tier.
 
     An unknown model bills _FALLBACK_RATES at any tier. A known model without a rate for
-    the tier (incl. commitment-priced "reserved") bills that model's Standard rate (DD5).
+    the tier (incl. commitment-priced "reserved") bills that model's Standard rate.
     """
     model = _load_pricing().get(model_id)
     if model is None:

@@ -325,12 +325,60 @@ def test_normalize_service_tier(raw, expected):
     assert normalize_service_tier(raw) == expected
 
 
-def test_negative_upstream_cost_is_skipped():
-    vendor = {
-        "anthropic.claude-x": {
+def _vendor(**costs) -> dict:
+    return {
+        "amazon.x-v1:0": {
             "litellm_provider": "bedrock",
-            "input_cost_per_token": -1e-06,
-            "output_cost_per_token": 5e-06,
+            "input_cost_per_token": 1e-06,
+            "output_cost_per_token": 2e-06,
+            **costs,
         }
     }
-    assert "anthropic.claude-x" not in _build_entries(vendor)[0]
+
+
+def test_negative_standard_cache_cost_falls_back_to_output_rate():
+    std = _build_entries(_vendor(cache_read_input_token_cost=-1e-07))[0]["amazon.x-v1:0"][
+        "standard"
+    ]
+    assert std["cache_read_input_usd_micros_per_1k"] == std["output_usd_micros_per_1k"] == 2000
+
+
+@pytest.mark.parametrize("bad", [-1e-07, "5e-7", True])
+def test_corrupt_tier_cost_drops_only_that_tier(bad):
+    tiers = _build_entries(
+        _vendor(input_cost_per_token_flex=bad, output_cost_per_token_flex=1e-06)
+    )[0]["amazon.x-v1:0"]
+    assert set(tiers) == {"standard"}
+
+
+def test_negative_tier_cache_cost_takes_the_scaled_fallback():
+    flex = _build_entries(
+        _vendor(
+            cache_read_input_token_cost=1e-07,
+            input_cost_per_token_flex=5e-07,
+            output_cost_per_token_flex=1e-06,
+            cache_read_input_token_cost_flex=-1e-07,
+        )
+    )[0]["amazon.x-v1:0"]["flex"]
+    assert flex["cache_read_input_usd_micros_per_1k"] == 50  # 100 x 0.5
+
+
+def test_negative_standard_cost_on_a_baked_in_model_recovers_the_baked_in_rate():
+    """Kept in the built catalog, rejected at runtime, replaced from DEFAULT_PRICING."""
+    from pricing import DEFAULT_PRICING, _default_pricing, _normalize_pricing_map
+
+    mid = "openai.gpt-oss-120b-1:0"
+    vendor = {
+        mid: {
+            "litellm_provider": "bedrock_converse",
+            "input_cost_per_token": -1e-07,
+            "output_cost_per_token": 6e-07,
+        }
+    }
+    built = _build_entries(vendor)[0]
+    assert mid in built
+    normalized = _normalize_pricing_map(built, _default_pricing())
+    assert (
+        normalized[mid]["standard"]["input_usd_micros_per_1k"]
+        == (DEFAULT_PRICING[mid]["standard"]["input_usd_micros_per_1k"])
+    )
