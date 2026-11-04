@@ -32,6 +32,14 @@ _BEDROCK_KEY_MAP = {
 # Model-agnostic count headers on every non-streaming InvokeModel response.
 _INPUT_COUNT_HEADER = "x-amzn-bedrock-input-token-count"
 _OUTPUT_COUNT_HEADER = "x-amzn-bedrock-output-token-count"
+_CACHE_READ_COUNT_HEADER = "x-amzn-bedrock-cache-read-input-token-count"
+_CACHE_WRITE_COUNT_HEADER = "x-amzn-bedrock-cache-write-input-token-count"
+_COUNT_HEADERS = (
+    _INPUT_COUNT_HEADER,
+    _OUTPUT_COUNT_HEADER,
+    _CACHE_READ_COUNT_HEADER,
+    _CACHE_WRITE_COUNT_HEADER,
+)
 
 # InvokeModel usage, first present wins: Anthropic body keys, then Bedrock-style body keys
 # (wrapped providers such as Nova), then the count headers (e.g. gpt-oss, whose body
@@ -43,13 +51,20 @@ _INVOKE_KEY_MAP = {
         "cache_read_input_tokens",
         "cacheReadInputTokenCount",
         "cacheReadInputTokens",
+        _CACHE_READ_COUNT_HEADER,
     ],
     "cache_write_input_tokens": [
         "cache_creation_input_tokens",
         "cacheWriteInputTokenCount",
         "cacheWriteInputTokens",
+        _CACHE_WRITE_COUNT_HEADER,
     ],
 }
+
+
+def _tier_kwargs(service_tier: str | None) -> dict:
+    """boto3 kwargs forwarding the client's requested tier, only when one was sent."""
+    return {"serviceTier": service_tier} if service_tier else {}
 
 
 def _sse_json_default(o):
@@ -177,14 +192,13 @@ def forward_invoke_model(
     forwarded only when set. The usage dict carries the tier Bedrock reports, normalized,
     plus ``raw_service_tier`` (Bedrock's own value, for the echo header) when one is present.
     """
-    tier_kwargs = {"serviceTier": service_tier} if service_tier else {}
     try:
         response = client.invoke_model(
             modelId=model_id,
             body=json.dumps(body),
             contentType="application/json",
             accept="application/json",
-            **tier_kwargs,
+            **_tier_kwargs(service_tier),
         )
     except ParamValidationError as exc:
         raise BedrockError("BAD_REQUEST", f"Invalid request body: {exc}", 400) from exc
@@ -192,9 +206,7 @@ def forward_invoke_model(
         _raise_bedrock_error(exc)
     response_body = json.loads(response["body"].read())
     headers = (response.get("ResponseMetadata") or {}).get("HTTPHeaders", {})
-    header_counts = {
-        h: headers[h] for h in (_INPUT_COUNT_HEADER, _OUTPUT_COUNT_HEADER) if h in headers
-    }
+    header_counts = {h: headers[h] for h in _COUNT_HEADERS if h in headers}
     body_usage = response_body.get("usage")
     merged = {**header_counts, **(body_usage if isinstance(body_usage, dict) else {})}
     if not _has_key(merged, _INVOKE_KEY_MAP["input_tokens"]):
@@ -314,14 +326,13 @@ def open_invoke_stream(client, model_id: str, body: dict, service_tier: str | No
     before StreamingResponse is constructed (amendment B1). ``service_tier`` is
     forwarded only when set; the response's ``serviceTier`` is the tier billed.
     """
-    tier_kwargs = {"serviceTier": service_tier} if service_tier else {}
     try:
         return client.invoke_model_with_response_stream(
             modelId=model_id,
             body=json.dumps(body),
             contentType="application/json",
             accept="application/json",
-            **tier_kwargs,
+            **_tier_kwargs(service_tier),
         )
     except ParamValidationError as exc:
         raise BedrockError("BAD_REQUEST", f"Invalid request body: {exc}", 400) from exc

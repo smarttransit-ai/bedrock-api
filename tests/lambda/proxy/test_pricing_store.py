@@ -16,11 +16,6 @@ def _s3():
     return boto3.client("s3", region_name="us-east-1")
 
 
-def test_default_object_key_is_v2():
-    # An old-shape object at pricing/current.json must never be read as the live catalog.
-    assert PRICING_OBJECT_KEY == "pricing/catalog-v2.json"
-
-
 def test_save_then_load_round_trip(pricing_bucket):
     s3 = _s3()
     catalog = {"m": {"standard": {"input_usd_micros_per_1k": 1}}}

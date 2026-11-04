@@ -4704,22 +4704,31 @@ _PRICING_TTL: float = float(os.environ.get("PRICING_CACHE_TTL_S", "60"))
 _PRICING_RETRY_TTL: float = 5.0
 
 
-def _normalize_rates(rates: dict) -> PricingRates | None:
-    """Return int rates with cache rates defaulted to output, or None if input/output is missing."""
+def _normalize_rates(rates: object) -> PricingRates | None:
+    """Return int rates with cache rates defaulted to output, or None if the tier is unusable.
+
+    Unusable means not a dict, missing input/output, or a rate that isn't an integer — one
+    bad tier is dropped on its own rather than taking the whole live catalog down.
+    """
+    if not isinstance(rates, dict):
+        return None
     if "input_usd_micros_per_1k" not in rates or "output_usd_micros_per_1k" not in rates:
         return None
-    input_rate = int(rates["input_usd_micros_per_1k"])
-    output_rate = int(rates["output_usd_micros_per_1k"])
-    return {
-        "input_usd_micros_per_1k": input_rate,
-        "output_usd_micros_per_1k": output_rate,
-        "cache_read_input_usd_micros_per_1k": int(
-            rates.get("cache_read_input_usd_micros_per_1k", output_rate)
-        ),
-        "cache_write_input_usd_micros_per_1k": int(
-            rates.get("cache_write_input_usd_micros_per_1k", output_rate)
-        ),
-    }
+    try:
+        input_rate = int(rates["input_usd_micros_per_1k"])
+        output_rate = int(rates["output_usd_micros_per_1k"])
+        return {
+            "input_usd_micros_per_1k": input_rate,
+            "output_usd_micros_per_1k": output_rate,
+            "cache_read_input_usd_micros_per_1k": int(
+                rates.get("cache_read_input_usd_micros_per_1k", output_rate)
+            ),
+            "cache_write_input_usd_micros_per_1k": int(
+                rates.get("cache_write_input_usd_micros_per_1k", output_rate)
+            ),
+        }
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_pricing_map(raw_map: dict) -> PricingMap:
@@ -4758,8 +4767,9 @@ def _load_pricing() -> PricingMap:
         _PRICING_CACHE = _normalize_pricing_map(live if live is not None else DEFAULT_PRICING)
         ttl = _PRICING_TTL
     except Exception as exc:
-        # Transient S3, or a corrupt object (unparseable, or a malformed tier value such as
-        # null) — serve baked-in rates, but re-check soon.
+        # Transient S3, or a corrupt object (unparseable, or not a catalog at all) — serve
+        # baked-in rates, but re-check soon. A single malformed tier is dropped in
+        # _normalize_pricing_map instead, without discarding the rest of the catalog.
         logger.warning(json.dumps({"event": "pricing_source_unavailable", "error": str(exc)}))
         _PRICING_CACHE = _normalize_pricing_map(DEFAULT_PRICING)
         ttl = _PRICING_RETRY_TTL

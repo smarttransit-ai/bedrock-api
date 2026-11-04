@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 import boto3
@@ -268,14 +269,35 @@ def test_corrupt_live_catalog_falls_back_to_default(pricing_bucket):
     assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
 
 
-def test_malformed_live_tier_falls_back_to_default(pricing_bucket):
-    """A parseable catalog with a non-dict tier must not make every request unbillable."""
-    _set_live({"us.anthropic.claude-sonnet-4-6": {"standard": None}})
-    _, _, fallback_applied, _, _ = compute_cost(
-        "us.anthropic.claude-sonnet-4-6", "standard", 1, 1, 0, 0
+def test_malformed_live_tier_drops_only_that_tier(pricing_bucket, caplog):
+    """A wrong-typed tier is dropped on its own; the rest of the live catalog still bills."""
+    good = {"input_usd_micros_per_1k": 7, "output_usd_micros_per_1k": 9}
+    _set_live(
+        {
+            "a.model": {"standard": good, "flex": None},
+            "b.model": {
+                "standard": {"input_usd_micros_per_1k": "abc", "output_usd_micros_per_1k": 1}
+            },
+            "c.model": {"standard": good},
+        }
     )
-    assert fallback_applied is False  # DEFAULT_PRICING served
-    assert pricing._PRICING_CACHE_TTL == pricing._PRICING_RETRY_TTL
+    with caplog.at_level(logging.WARNING):
+        a_std = compute_cost("a.model", "standard", 1000, 0, 0, 0)
+        a_flex = compute_cost("a.model", "flex", 1000, 0, 0, 0)
+        b_std = compute_cost("b.model", "standard", 1000, 0, 0, 0)
+        c_std = compute_cost("c.model", "standard", 1000, 0, 0, 0)
+    assert a_std[0] == 7 and a_std[2] is False
+    assert a_flex[0] == 7 and a_flex[3] == ["service_tier"]  # bad Flex → model Standard
+    assert b_std[3] == ["model_id"]  # bad Standard → model dropped → unknown-model fallback
+    assert c_std[0] == 7 and c_std[2] is False  # live catalog kept, not DEFAULT_PRICING
+    assert pricing._PRICING_CACHE_TTL == pricing._PRICING_TTL
+    invalid = [
+        json.loads(r.message) for r in caplog.records if "pricing_entry_invalid" in r.message
+    ]
+    assert {(e["model_id"], e["tier"]) for e in invalid} == {
+        ("a.model", "flex"),
+        ("b.model", "standard"),
+    }
 
 
 def test_transient_s3_error_falls_back_and_short_retry(monkeypatch):

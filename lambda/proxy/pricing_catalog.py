@@ -106,9 +106,8 @@ def normalize_service_tier(raw: object) -> str:
     """
     if isinstance(raw, dict):
         raw = raw.get("type")
-    if not isinstance(raw, str) or raw.lower() in ("", "default", "auto"):
-        return "standard"
-    return raw.lower()
+    tier = raw.lower() if isinstance(raw, str) else ""
+    return "standard" if tier in ("", "default", "auto") else tier
 
 
 def _provider_of(model_id: str) -> str:

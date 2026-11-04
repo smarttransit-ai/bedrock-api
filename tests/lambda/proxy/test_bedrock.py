@@ -191,6 +191,19 @@ def test_forward_invoke_model_header_count_fallback_for_gpt_oss():
     assert usage["output_tokens"] == 30
 
 
+def test_forward_invoke_model_cache_count_headers_fallback():
+    """Bedrock's cache-count headers fill cache counters the body doesn't report."""
+    headers = {
+        **_COUNT_HEADERS,
+        "x-amzn-bedrock-cache-read-input-token-count": "11",
+        "x-amzn-bedrock-cache-write-input-token-count": "4",
+    }
+    client = _Client({"body": _Body(_GPT_OSS_BODY), "ResponseMetadata": {"HTTPHeaders": headers}})
+    _, usage = forward_invoke_model(client, "openai.gpt-oss-120b-1:0", {})
+    assert usage["cache_read_input_tokens"] == 11
+    assert usage["cache_write_input_tokens"] == 4
+
+
 @pytest.mark.parametrize(
     "body_usage",
     [
