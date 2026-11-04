@@ -75,7 +75,7 @@ def validate_catalog(catalog: dict) -> None:
                 raise ValueError(f"required model {mid!r} lost its {tier!r} tier")
             rates = catalog[mid][tier]
             for key in ("input_usd_micros_per_1k", "output_usd_micros_per_1k"):
-                value = rates.get(key, 0)
+                value = rates[key]
                 if value <= 0:
                     raise ValueError(f"{mid}.{tier}.{key} is non-positive ({value})")
                 if not (base[key] / 10 <= value <= base[key] * 10):

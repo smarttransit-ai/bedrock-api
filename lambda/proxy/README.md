@@ -131,7 +131,7 @@ defaults to the output rate; a missing tier cache cost (or one that differs on z
 from Standard's filled cache rate) becomes Standard's cache rate scaled by the tier's
 input-cost ratio. Any corrupt or implausible upstream price field rejects the whole build,
 so a refresh fails closed and the last good catalog stays live: a value that is negative,
-non-finite, bool or string; a positive cost outside $0.0001 to $1,000 per 1M tokens; a
+non-finite, bool or string; a positive cost outside $0.0005 to $1,000 per 1M tokens; a
 Standard input of 0 with a paid output; or a Flex/Priority cost that differs from the
 matching Standard cost on zero-ness or by more than 4x either way. Reading the live catalog
 follows one rule: any corrupt entry (a model that isn't an object or has no `standard`

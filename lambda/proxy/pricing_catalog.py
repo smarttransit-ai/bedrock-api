@@ -154,18 +154,24 @@ def _check_costs(model_id: str, entry: dict) -> None:
     def corrupt(field: str) -> ValueError:
         return ValueError(f"corrupt upstream price for {model_id}: {field}={entry[field]!r}")
 
-    lo, hi = _COST_BOUNDS
     for field in _COST_FIELD_NAMES:
         value = entry.get(field)
-        # The range test also rejects negatives, NaN, infinities and huge ints.
+        # The range test also rejects negatives, NaN, infinities and huge ints. A positive
+        # cost must still be positive once stored (>= 1 µUSD/1k), so nothing paid is free.
         if value is not None and (
-            type(value) not in (int, float) or not (value == 0 or lo <= value <= hi)
+            type(value) not in (int, float)
+            or not (
+                value == 0
+                or (_COST_BOUNDS[0] <= value <= _COST_BOUNDS[1])
+                and _per_token_to_micros_per_1k(value) >= 1
+            )
         ):
             raise corrupt(field)
     if entry["input_cost_per_token"] == 0 < entry["output_cost_per_token"]:
         raise corrupt("input_cost_per_token")
     lo, hi = _TIER_RATIO_BOUNDS
-    for suffix in (_TIER_SUFFIXES["flex"], _TIER_SUFFIXES["priority"]):
+    for tier_name in SERVICE_TIERS[1:]:
+        suffix = _TIER_SUFFIXES[tier_name]
         for field in _COST_FIELDS.values():
             tier, std = entry.get(field + suffix), entry.get(field)
             if (
@@ -186,10 +192,11 @@ def _to_rates(
     already rejected any tier cost that disagrees with Standard.
 
     Cache fallback (D3): Standard defaults a missing cache cost to its output rate. A
-    tier cache cost that is missing, or differs on zero-ness from Standard's filled cache
-    rate, becomes that rate scaled by the tier's raw input ratio (Standard input is
-    nonzero: ``_check_costs`` and Pass 1 reject the alternatives) — the tier OUTPUT rate
-    would over-bill cache reads ~32x on nova-2-pro.
+    tier cache cost that is missing, or has no explicit Standard cache cost to be bounded
+    against, becomes Standard's filled cache rate scaled by the tier's raw input ratio
+    (Standard input is nonzero: ``_check_costs`` and Pass 1 reject the alternatives) — the
+    tier OUTPUT rate would over-bill cache reads ~32x on nova-2-pro. A scaled paid rate
+    never rounds down to free.
     entry.get(key) returns None for both absent keys and JSON null values.
     """
     suffix = _TIER_SUFFIXES[tier]
@@ -205,8 +212,11 @@ def _to_rates(
     ratio = inp / entry["input_cost_per_token"]
     rates = {}
     for rate, cost in costs.items():
-        if rate in _CACHE_RATES and (cost is None or (cost > 0) != (standard[rate] > 0)):
-            rates[rate] = round(standard[rate] * ratio)
+        # A tier cache cost is trusted only beside an explicit Standard cache cost, which
+        # _check_costs bounds it against; otherwise it is scaled from Standard's filled rate.
+        if rate in _CACHE_RATES and (cost is None or entry.get(_COST_FIELDS[rate]) is None):
+            # A paid Standard cache rate never scales down to free.
+            rates[rate] = max(1, round(standard[rate] * ratio)) if standard[rate] else 0
         else:
             rates[rate] = _per_token_to_micros_per_1k(cost)
     return rates

@@ -232,26 +232,16 @@ def test_embedding_keeps_zero_output_tier():
     assert flex["output_usd_micros_per_1k"] == 0
 
 
-def test_zero_tier_cache_over_filled_standard_cache_uses_scaled_fallback():
-    # Standard's cache is absent, so _check_costs has nothing to compare; the build
-    # compares against the filled (output) rate and scales it instead of billing $0.
+@pytest.mark.parametrize("tier_cache", [0, 3.0e-08, 9e-04])
+def test_tier_cache_ignored_when_standard_cache_absent(tier_cache):
+    """With no Standard cache cost to bound it against, a tier cache cost is not trusted:
+    it is scaled from Standard's filled (output) cache rate, as Standard itself is."""
     entry = _tiered(
         input_cost_per_token_flex=5.0e-07,
         output_cost_per_token_flex=1.0e-06,
-        cache_read_input_token_cost_flex=0,
+        cache_read_input_token_cost_flex=tier_cache,
     )
     assert _tiers(entry)["flex"]["cache_read_input_usd_micros_per_1k"] == 1000  # 2000 x 0.5
-
-
-def test_tier_cache_kept_when_standard_cache_absent():
-    # Standard's cache is filled from its (positive) output rate, so a positive tier
-    # cache cost passes the zero-ness test and is kept verbatim.
-    entry = _tiered(
-        input_cost_per_token_flex=5.0e-07,
-        output_cost_per_token_flex=1.0e-06,
-        cache_read_input_token_cost_flex=3.0e-08,
-    )
-    assert _tiers(entry)["flex"]["cache_read_input_usd_micros_per_1k"] == 30
 
 
 def test_tier_cache_fallback_scales_with_input_ratio():
@@ -351,6 +341,26 @@ def test_implausible_upstream_cost_fails_the_build(extra, field):
         _tiers(entry | extra)
 
 
-def test_cost_that_would_round_to_zero_is_rejected():
+@pytest.mark.parametrize("cost", [3e-10, 5e-10])  # 5e-10 → 0.5 µUSD/1k rounds to 0
+def test_cost_that_would_round_to_zero_is_rejected(cost):
     with pytest.raises(ValueError, match="input_cost_per_token="):
-        _build_entries({"openai.m": _tiered(input_cost_per_token=3e-10)})
+        _build_entries({"openai.m": _tiered(input_cost_per_token=cost)})
+
+
+def test_cost_just_above_the_floor_is_kept():
+    entry = _build_entries({"openai.m": _tiered(input_cost_per_token=1.5e-9)})[0]["openai.m"]
+    assert entry["standard"]["input_usd_micros_per_1k"] == 2
+
+
+def test_scaled_tier_cache_rate_never_rounds_a_paid_rate_to_free():
+    tiers = _build_entries(
+        {
+            "openai.m": _tiered(
+                cache_read_input_token_cost=1e-09,
+                input_cost_per_token_flex=4.3e-07,
+                output_cost_per_token_flex=8.6e-07,
+            )
+        }
+    )[0]["openai.m"]
+    assert tiers["standard"]["cache_read_input_usd_micros_per_1k"] == 1
+    assert tiers["flex"]["cache_read_input_usd_micros_per_1k"] == 1

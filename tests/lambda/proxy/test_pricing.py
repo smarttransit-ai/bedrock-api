@@ -290,7 +290,8 @@ def test_normalize_rates_rejects_non_int_or_negative_rates(bad):
 
     good = {"input_usd_micros_per_1k": 7, "output_usd_micros_per_1k": 9}
     for key in (*good, "cache_read_input_usd_micros_per_1k"):
-        assert _normalize_rates({**good, key: bad}) is None
+        with pytest.raises(ValueError):
+            _normalize_rates({**good, key: bad})
 
 
 def test_transient_s3_error_falls_back_and_short_retry(monkeypatch):

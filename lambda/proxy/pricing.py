@@ -4712,29 +4712,29 @@ def _rate(value: object) -> int:
     return value
 
 
-def _normalize_rates(rates: object) -> PricingRates | None:
-    """Return int rates with cache rates defaulted to output, or None if the tier is unusable.
+def _normalize_rates(rates: object) -> PricingRates:
+    """Return int rates with cache rates defaulted to output; raise ValueError if unusable.
 
     Unusable means not a dict, missing input/output, or any rate that isn't a non-negative
     int — a negative rate would credit budgets back.
     """
     if not isinstance(rates, dict):
-        return None
+        raise ValueError("not an object")
     try:
         input_rate = _rate(rates["input_usd_micros_per_1k"])
         output_rate = _rate(rates["output_usd_micros_per_1k"])
-        return {
-            "input_usd_micros_per_1k": input_rate,
-            "output_usd_micros_per_1k": output_rate,
-            "cache_read_input_usd_micros_per_1k": _rate(
-                rates.get("cache_read_input_usd_micros_per_1k", output_rate)
-            ),
-            "cache_write_input_usd_micros_per_1k": _rate(
-                rates.get("cache_write_input_usd_micros_per_1k", output_rate)
-            ),
-        }
-    except (KeyError, ValueError):
-        return None
+    except KeyError as exc:
+        raise ValueError(f"missing {exc.args[0]}") from exc
+    return {
+        "input_usd_micros_per_1k": input_rate,
+        "output_usd_micros_per_1k": output_rate,
+        "cache_read_input_usd_micros_per_1k": _rate(
+            rates.get("cache_read_input_usd_micros_per_1k", output_rate)
+        ),
+        "cache_write_input_usd_micros_per_1k": _rate(
+            rates.get("cache_write_input_usd_micros_per_1k", output_rate)
+        ),
+    }
 
 
 def _normalize_pricing_map(raw_map: dict) -> PricingMap:
@@ -4753,9 +4753,10 @@ def _normalize_pricing_map(raw_map: dict) -> PricingMap:
         tiers: PricingTierMap = {}
         for tier in SERVICE_TIERS:
             if tier in value:
-                if (rates := _normalize_rates(value[tier])) is None:
-                    raise ValueError(f"invalid pricing entry for {model_id}: {tier}")
-                tiers[tier] = rates
+                try:
+                    tiers[tier] = _normalize_rates(value[tier])
+                except ValueError as exc:
+                    raise ValueError(f"invalid pricing entry for {model_id}: {tier}") from exc
         normalized[model_id] = tiers
     return normalized
 
