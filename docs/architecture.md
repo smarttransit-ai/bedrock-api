@@ -61,7 +61,7 @@ graph TB
 
     Mantle["AWS bedrock-mantle<br/>/openai/v1/responses → Responses API<br/>(openai.* · google.gemma-4-* · xai.grok-4.3)"]
 
-    PricingS3["S3: bedrock-api-pricing-&lt;account&gt;<br/>pricing/current.json<br/>(live pricing catalog)"]
+    PricingS3["S3: bedrock-api-pricing-&lt;account&gt;<br/>pricing/catalog-v2.json<br/>(live pricing catalog)"]
 
     subgraph CW["CloudWatch"]
         LogLambda["/aws/lambda/bedrock-api-proxy"]
@@ -124,6 +124,15 @@ miss the catalog and charge the Opus-tier fallback (~11x) with nothing failing l
 Reasoning tokens (`output_tokens_details.reasoning_tokens`) are a **subset** of
 `output_tokens`, not an additive dimension: they are logged, never billed separately.
 
+**Each request bills at the service tier the response reports** — Standard, Flex or
+Priority — never the tier the client asked for, since AWS may serve a different one
+(Responses `auto`, for one). Converse reports it in `serviceTier.type`, converse-stream in
+its `metadata` event, InvokeModel (and its stream) in the top-level `serviceTier`, and
+Responses in `service_tier`; absent, `default` or `auto` mean Standard. The catalog keys
+rates by tier (`{"standard", "flex"?, "priority"?}`), taken from litellm's `*_flex` /
+`*_priority` fields. A model without a rate for the tier — including commitment-priced
+Reserved — bills its own Standard rate and logs `pricing_fallback_rate`.
+
 ---
 
 ## Request Pipeline
@@ -176,7 +185,6 @@ erDiagram
         number limit_max_input_tokens
         number limit_max_output_tokens
         number limit_rps
-        string pricing_mode
     }
     USAGE {
         string token_id PK
@@ -209,9 +217,9 @@ graph LR
     subgraph Filters["Log Metric Filters → namespace: bedrock-api/proxy"]
         F1["bedrock-api-request-complete-count<br/>→ RequestCompleteCount"]
         F2["bedrock-api-pricing-fallback-count<br/>→ PricingFallbackCount"]
-        F3["bedrock-api-pricing-mode-invalid<br/>→ PricingModeInvalidCount"]
-        F4["bedrock-api-pricing-mode-on-demand-count<br/>→ PricingModeOnDemandCount"]
-        F5["bedrock-api-pricing-mode-batch-count<br/>→ PricingModeBatchCount"]
+        F3["bedrock-api-service-tier-standard-count<br/>→ ServiceTierStandardCount"]
+        F4["bedrock-api-service-tier-flex-count<br/>→ ServiceTierFlexCount"]
+        F5["bedrock-api-service-tier-priority-count<br/>→ ServiceTierPriorityCount"]
     end
 
     Alarm["Alarm: bedrock-api-pricing-fallback-high<br/>fires when fallbacks &gt; max(1% of requests, 100)<br/>in any 15-minute window"]

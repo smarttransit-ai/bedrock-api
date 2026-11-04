@@ -273,7 +273,7 @@ Revoking an already-revoked token is a no-op (exits 0).
 ## Refresh pricing
 
 Pricing is served from a live catalog in S3 (`<name_prefix>-pricing-<account>`,
-object `pricing/current.json`), cached per-instance for `pricing_cache_ttl_s`
+object `pricing/catalog-v2.json`), cached per-instance for `pricing_cache_ttl_s`
 (default 60s). When the object is absent or unreachable, the proxy falls back to
 the rates baked into the image (`DEFAULT_PRICING`). To update prices on a running
 deployment — no redeploy — re-pull from litellm via the admin endpoint.
@@ -293,15 +293,22 @@ curl -sS -X POST "$API_URL/admin/pricing/refresh" \
 ```
 
 On success (HTTP 200) it returns a summary and the new catalog is live within one
-`pricing_cache_ttl_s` window across all instances:
+`pricing_cache_ttl_s` window across all instances. Each anchor model lists its rates per
+service tier (abridged here; every tier also carries cache rates):
 
 ```json
 {
-  "entry_count": 291,
-  "fetched_at": "2026-06-08T20:00:00+00:00",
+  "entry_count": 442,
+  "fetched_at": "2026-11-04T20:00:00+00:00",
   "anchors": {
-    "us.anthropic.claude-sonnet-4-6": {"input_usd_micros_per_1k": 3300, "output_usd_micros_per_1k": 16500},
-    "us.anthropic.claude-haiku-4-5-20251001-v1:0": {"input_usd_micros_per_1k": 1100, "output_usd_micros_per_1k": 5500}
+    "us.anthropic.claude-sonnet-4-6": {
+      "standard": {"input_usd_micros_per_1k": 3300, "output_usd_micros_per_1k": 16500}
+    },
+    "openai.gpt-oss-120b-1:0": {
+      "standard": {"input_usd_micros_per_1k": 150, "output_usd_micros_per_1k": 600},
+      "flex": {"input_usd_micros_per_1k": 75, "output_usd_micros_per_1k": 300},
+      "priority": {"input_usd_micros_per_1k": 262, "output_usd_micros_per_1k": 1050}
+    }
   }
 }
 ```
@@ -310,13 +317,13 @@ On success (HTTP 200) it returns a summary and the new catalog is live within on
 
 ```bash
 curl -sS "$API_URL/admin/pricing" -H "Authorization: Bearer $(cat admin-token.txt)" | jq .
-# {"source":"live","meta":{"fetched_at":"…","source":"…","entry_count":291}}
+# {"source":"live","meta":{"fetched_at":"…","source":"…","entry_count":442}}
 # or {"source":"default","meta":null}  ← no refresh yet; baked-in rates in use
 ```
 
 It is **all-or-nothing and validated** — the refresh writes S3 only if the rebuilt
 catalog passes the gate (non-empty; not >20% smaller than the baked-in catalog;
-the in-use anchor models present with sane, in-band rates). If the pull fails or
+the anchor models present with sane, in-band rates at every tier they carry). If the pull fails or
 the gate rejects it, the endpoint returns **`502 REFRESH_FAILED`** and **current
 pricing is left untouched** (detail is in the `pricing_refresh_failed` log, not the
 response). A non-admin token gets **`403 FORBIDDEN`**.
