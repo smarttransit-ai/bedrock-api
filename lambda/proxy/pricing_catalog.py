@@ -145,10 +145,11 @@ def _check_costs(model_id: str, entry: dict) -> None:
 
     Raises ValueError on a present cost field that is not a finite, non-negative int or
     float (bool and string included), a positive cost that rounds to 0 µUSD/1k or exceeds
-    ``_MAX_COST``, a free Standard input with a paid output, or a Flex/Priority cost that differs from the
-    matching Standard cost on zero-ness or by a ratio outside ``_TIER_RATIO_BOUNDS``. A
-    live refresh then fails closed — the last good catalog stays in S3 — and gen_pricing
-    exits. Stale prices are recoverable; a wrong price bills real budgets.
+    ``_MAX_COST``, a free Standard input with a paid output, or a Flex/Priority cost that
+    differs from the matching Standard cost on zero-ness or by a ratio outside
+    ``_TIER_RATIO_BOUNDS``. A live refresh then fails closed — the last good catalog stays
+    in S3 — and gen_pricing exits. Stale prices are recoverable; a wrong price bills real
+    budgets.
     """
 
     def corrupt(field: str) -> ValueError:
